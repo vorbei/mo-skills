@@ -1,0 +1,138 @@
+---
+name: mo-codex
+description: "Streaming wrapper over the Codex companion runtime. Fast, thin alternative to /codex:rescue that avoids the subagent + skill-loading + foreground-blocking overhead. Use when you want Codex to (a) review a plan document, (b) review the current branch's diff against a base ref, or (c) take over a substantial coding task — and you want output to start streaming within ~1s instead of arriving only after the entire Codex turn finishes. Trigger: 'mo-codex', 'let codex review the plan', 'ask codex to handoff this', 'codex review against dev'."
+---
+
+# mo-codex — Streaming Codex wrapper
+
+A thin shell wrapper around `codex-companion.mjs` (the official Codex
+Claude Code plugin runtime). It exists for one reason: **early streaming
+output**. The `/codex:rescue` subagent path adds 5–15s of subagent +
+skill-loading overhead and then blocks foregroundly on the entire Codex
+turn before the user sees anything. `mo-codex` skips all of that:
+
+- Direct shell call from the main thread (no subagent indirection).
+- Always launches the Codex job with `task --background --json`, so the
+  runtime returns within ~1s with `{ jobId, logFile }`.
+- Then `tail -f`s the log file so the Codex stream renders as it is
+  produced.
+- On `Ctrl-C` it cancels the underlying job via
+  `codex-companion cancel <jobId>`.
+
+All actual review / task execution still goes through the official
+`codex-companion.mjs` — no reimplementation of the Codex protocol.
+
+## Prerequisites
+
+The openai-codex plugin must be installed:
+
+```
+/plugin marketplace add anthropics/codex
+/plugin install codex
+```
+
+`codex-companion.mjs` lives under
+`~/.claude/plugins/cache/openai-codex/codex/<ver>/scripts/`. `mo-codex`
+picks the latest version automatically.
+
+## When to use
+
+| Scenario | Verb |
+|---|---|
+| You just wrote a plan with `/mo-plan` and want a second opinion on **whether the approach is the right one** (not on unit sizing, test names, or other implementation details) before `/mo-work` | `review-plan` |
+| You finished work on a feature/fix branch and want a code review against the default base before opening a PR | `review-code` |
+| The current Claude thread is stuck, or the task is open-ended and would burn this thread's context | `handoff` |
+
+For trivial questions or quick edits, do not invoke `mo-codex` — just
+answer or edit directly.
+
+## Verbs
+
+```
+mo-codex review-plan <plan.md> [--effort low|medium|high] [--wait] [--raw]
+mo-codex review-code [--base <ref>] [--effort ...] [--wait] [--raw]
+mo-codex handoff "<task text>" [--base <ref>] [--write|--read-only] [--resume|--fresh] [--effort ...] [--model ...] [--wait] [--raw]
+mo-codex warm [cwd]
+```
+
+`warm` prewarms the per-cwd Codex broker without submitting a task.
+Idempotent (no-op if already alive). Does not consume Codex credit. Call
+it right after creating a new worktree so the first real `mo-codex ...`
+in that worktree skips the 1–3s broker spawn. `/mo-plan` invokes this
+automatically after creating standard/deep worktrees.
+
+- `--base` defaults to `origin/<base.default>` from `mo-config.json`
+  (falling back to `origin/dev` if no config). **Never a plain local
+  branch name** — local refs are frequently stale after rebases and
+  produce phantom diffs. The script auto-runs
+  `git fetch origin <base>` before building the diff prompt for
+  `review-code`. Pass `--base main` (or whatever `base.emergency` is
+  configured to) only for emergency fixes.
+- `--effort` is **auto-selected** when you do not pass it explicitly:
+  - `review-plan`: plan file ≥100 lines → `medium`, else `low`.
+  - `review-code`: `git diff --shortstat <base>...HEAD` total
+    additions+deletions — <50 → `low`, <500 → `medium`, else `high`.
+  - `handoff`: unset (Codex picks).
+  The chosen effort is printed to stderr as
+  `mo-codex: auto-effort=… (…)`. Pass `--effort` to override.
+- `--wait` runs the Codex command in foreground mode. No streaming; you
+  only see the final result. Use this when you want a single clean
+  final answer to capture, or when the caller really needs a blocking
+  call.
+- `--raw` disables the stream filter so you see the raw
+  `codex-companion` log. Default mode pipes through `format-stream.mjs`,
+  which drops low-signal lines, highlights block titles, and emits a
+  `· Ns elapsed, still running...` heartbeat every 15s of idle output.
+- `--resume` adds `--resume-last` so Codex picks up the last task thread
+  for this workspace. `--fresh` is the default.
+- `handoff` defaults to write-capable (`--write`); pass `--read-only`
+  for diagnosis-only handoffs.
+
+## How to invoke
+
+The main Claude thread runs the script directly via `Bash`. **Do not**
+wrap this in `/codex:rescue` or any other subagent — the whole point is
+to skip that layer.
+
+```bash
+<plugin-root>/skills/mo-codex/mo-codex.sh review-plan <plan.md>
+<plugin-root>/skills/mo-codex/mo-codex.sh review-code --base origin/dev
+<plugin-root>/skills/mo-codex/mo-codex.sh handoff "Refactor the dock store to drop getState() inside render callbacks."
+```
+
+`<plugin-root>` is the installed plugin directory (usually
+`~/.claude/plugins/cache/<marketplace>/mo-skills/`). The skill front-end
+resolves this automatically; only the script path matters if you invoke
+it from a bash command.
+
+stdout streams the Codex turn's progress events (filtered unless
+`--raw`). After the job terminates, the script extracts the verdict
+line (`LGTM` / `NITS` / `CHANGES REQUESTED` / `BLOCK` /
+`APPROACH SOUND` / `APPROACH NEEDS ADJUSTMENT` / `RETHINK APPROACH`)
+and prints it on a `═══ VERDICT: … ═══` banner to stderr before dumping
+the full final result.
+
+## What it does NOT do
+
+- It does **not** call `codex review` / `codex adversarial-review`
+  natively. Those code paths only support foreground execution in
+  `codex-companion.mjs`, so they cannot stream. `mo-codex review-code`
+  instead uses `task --background` with a review prompt that asks Codex
+  to run `git diff <base>...HEAD` itself. If you specifically need the
+  native review tooling, call `codex review` directly.
+- It does **not** start the stop-time review gate. That gate is
+  disabled by default and should stay disabled
+  (`/codex:setup --disable-review-gate`).
+- It does **not** reshape or "improve" the user's prompt with another
+  LLM pass. The verb-specific prompt template is fixed and English-only.
+
+## Failure modes
+
+- If `~/.claude/plugins/cache/openai-codex/codex/` is missing or empty,
+  the script exits 2 with a clear message — install the openai-codex
+  plugin first.
+- If the Codex auth has expired, the background job will fail almost
+  immediately. The tail will show the failure and the final `result`
+  block will explain. Run `/codex:setup` to re-auth.
+- If the Codex broker for the cwd is missing, the first call will spawn
+  one (~1–3s extra). Subsequent calls in the same workspace reuse it.

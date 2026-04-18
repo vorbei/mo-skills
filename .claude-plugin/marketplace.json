@@ -1,0 +1,25 @@
+{
+  "name": "mo-skills",
+  "owner": {
+    "name": "vorbei",
+    "url": "https://github.com/vorbei"
+  },
+  "metadata": {
+    "description": "Opinionated planning + TDD + handoff skills for Claude Code, configurable via mo-config.json.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "mo",
+      "description": "Planning + TDD + handoff skills (mo-plan / mo-work / mo-clean / mo-codex / mo-handoff). A thin configurable overlay on ce:plan / ce:work / ce:compound and codex:rescue.",
+      "version": "0.1.0",
+      "author": {
+        "name": "vorbei",
+        "url": "https://github.com/vorbei"
+      },
+      "homepage": "https://github.com/vorbei/mo-skills",
+      "tags": ["planning", "tdd", "codex", "workflow", "worktree"],
+      "source": "./plugins/mo"
+    }
+  ]
+}

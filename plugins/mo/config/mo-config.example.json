@@ -1,0 +1,52 @@
+{
+  "$schema": "../config/mo-config.schema.json",
+  "project": {
+    "name": "my-project",
+    "primaryRepo": "/absolute/path/to/your/main/repo"
+  },
+  "planStore": "/absolute/path/to/a/gitignored/plans-dir",
+  "harnessDir": "/absolute/path/to/your/harness",
+  "frontend": {
+    "enabled": true,
+    "designDocs": [
+      "client/webapp/docs/design.md",
+      "client/webapp/docs/design-ux.md"
+    ],
+    "mobileWidth": 375,
+    "containerCheckCommand": "pnpm test -- src/components/architecture.test.ts",
+    "containerGlob": "client/webapp/src/components/**/*.tsx"
+  },
+  "commands": {
+    "test": "pnpm test",
+    "typecheck": "pnpm typecheck",
+    "archLint": "pnpm lint:arch",
+    "extraLinters": ["uvx ruff check --fix", "uvx ruff format"]
+  },
+  "issueTracker": {
+    "type": "linear",
+    "prefix": "PROJ",
+    "apiKeyEnv": "LINEAR_API_KEY",
+    "reviewState": "In Review"
+  },
+  "branchNaming": {
+    "bugfix": "fix/{issue}-{slug}",
+    "feature": "feat/{slug}",
+    "refactor": "refactor/{slug}"
+  },
+  "base": {
+    "default": "dev",
+    "emergency": "main"
+  },
+  "commitScopes": [
+    "webapp", "server", "api", "cli", "infra", "mobile"
+  ],
+  "protectedWorktrees": [
+    "/absolute/path/to/your/worktree-root/dev",
+    "/absolute/path/to/your/worktree-root/main"
+  ],
+  "envFile": "~/.claude/.env",
+  "language": {
+    "artifacts": "English",
+    "conversation": "English"
+  }
+}

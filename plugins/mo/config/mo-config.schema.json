@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/vorbei/mo-skills/blob/main/config/mo-config.schema.json",
+  "title": "mo-config",
+  "description": "Configuration schema for mo-skills. Resolution order: $CLAUDE_PROJECT_DIR/.claude/mo-config.json → ~/.claude/mo-config.json → plugin defaults.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Human-readable project name (shown in prompts)." },
+        "primaryRepo": { "type": "string", "description": "Absolute path to the main git repository." }
+      }
+    },
+    "planStore": {
+      "type": "string",
+      "description": "Absolute path to the directory where plan files are written. MUST be gitignored. All worktrees share this one store."
+    },
+    "harnessDir": {
+      "type": "string",
+      "description": "Directory containing DECISIONS.md, protocols.md, plan-quality-gate.md, tdd-and-simplify.md, frontend.md. If absent, skills fall back to the plugin's templates/harness/ copies."
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false, "description": "If false, frontend-only rules (design doc reads, mobile check, container/view split) are skipped." },
+        "designDocs": { "type": "array", "items": { "type": "string" }, "description": "Paths (relative to primaryRepo) of design docs mo-work must read before any frontend unit." },
+        "mobileWidth": { "type": "integer", "default": 375, "description": "Viewport width used for mobile verification after frontend changes." },
+        "containerCheckCommand": { "type": "string", "description": "Shell command that verifies container/view separation, e.g. \"pnpm test -- src/components/architecture.test.ts\"." },
+        "containerGlob": { "type": "string", "description": "Glob identifying container files, e.g. \"client/webapp/src/components/**/*.tsx\"." }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "test": { "type": "string", "default": "pnpm test" },
+        "typecheck": { "type": "string", "default": "pnpm typecheck" },
+        "archLint": { "type": "string", "default": "pnpm lint:arch", "description": "Architecture boundary linter. Empty string disables the check." },
+        "extraLinters": { "type": "array", "items": { "type": "string" }, "description": "Additional lint/format commands to run alongside the main gates, e.g. [\"uvx ruff check --fix\", \"uvx ruff format\"]." }
+      }
+    },
+    "issueTracker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["linear", "github", "jira", "none"], "default": "none" },
+        "prefix": { "type": "string", "description": "Issue ID prefix used to extract ticket numbers from branch names, e.g. \"MAX\" matches MAX-123." },
+        "apiKeyEnv": { "type": "string", "description": "Environment variable holding the tracker API key." },
+        "reviewState": { "type": "string", "default": "In Review", "description": "State to move an issue into after mo-clean confirms merge." }
+      }
+    },
+    "branchNaming": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bugfix": { "type": "string", "default": "fix/{issue}-{slug}", "description": "Branch template for bug fixes. {issue} and {slug} are substituted." },
+        "feature": { "type": "string", "default": "feat/{slug}" },
+        "refactor": { "type": "string", "default": "refactor/{slug}" }
+      }
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": { "type": "string", "default": "dev", "description": "Normal base branch for planning + review." },
+        "emergency": { "type": "string", "default": "main", "description": "Only used for emergency fixes." }
+      }
+    },
+    "commitScopes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Valid commit scopes for the Conventional Commit format used by mo-work."
+    },
+    "protectedWorktrees": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Absolute paths that mo-clean must never delete (main long-lived worktrees)."
+    },
+    "envFile": {
+      "type": "string",
+      "default": "~/.claude/.env",
+      "description": "Path to the env file sourced before external API calls (Linear, etc)."
+    },
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": { "type": "string", "default": "English", "description": "Language for committed artifacts (plans, docs, commit messages)." },
+        "conversation": { "type": "string", "default": "English", "description": "Language for conversational replies to the user." }
+      }
+    }
+  }
+}

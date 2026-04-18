@@ -1,0 +1,10 @@
+{
+  "name": "mo",
+  "version": "0.1.0",
+  "description": "Planning + TDD + handoff skills — a thin project overlay on ce:plan / ce:work / ce:compound and codex:rescue.",
+  "author": {
+    "name": "vorbei",
+    "url": "https://github.com/vorbei"
+  },
+  "homepage": "https://github.com/vorbei/mo-skills"
+}
