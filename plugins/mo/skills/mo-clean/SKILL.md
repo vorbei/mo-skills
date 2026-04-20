@@ -160,8 +160,11 @@ and skip to Step 4.
 
 ## Step 4 — Kill services bound to the worktree
 
-Before removing the worktree directory, find and stop any processes (dev
-servers, vite, node, etc.) started from inside it.
+Before removing the worktree directory, find and stop any processes
+(dev servers, vite, node, Codex brokers, tail-f on job logs, etc.)
+started from inside it.
+
+### 4a — Listening TCP servers
 
 ```bash
 LISTEN_PIDS=$(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1 {split($9,a,":"); ports[$2]=ports[$2] a[length(a)] ","; name[$2]=$1} END {for(p in ports) print p, name[p], ports[p]}')
@@ -172,9 +175,43 @@ echo "$LISTEN_PIDS" | while read pid name ports; do
 done
 ```
 
+### 4b — Codex brokers + tails bound to the worktree
+
+Codex `app-server-broker.mjs` binds `--cwd <worktree>` and stays alive
+across sessions. `tail -f` on its per-job log files also lingers.
+Neither listens on TCP, so 4a misses them.
+
+```bash
+# Kill any Codex process whose args reference this worktree
+ps aux | grep -E "codex app-server|app-server-broker|task-.*\.log" \
+  | grep -v grep \
+  | grep -F "$WORKTREE_PATH" \
+  | awk '{print $2}' | xargs -r kill 2>/dev/null
+
+# Remove the matching broker socket dirs
+for d in /var/folders/*/*/T/cxc-*/ /tmp/cxc-*/; do
+  pidfile="$d/broker.pid"; [[ -f "$pidfile" ]] || continue
+  pid=$(cat "$pidfile" 2>/dev/null)
+  # Dead broker OR broker whose cwd matched this worktree → clean up
+  if ! kill -0 "$pid" 2>/dev/null; then
+    rm -rf "$d"
+  elif ps -p "$pid" -o args= 2>/dev/null | grep -qF "$WORKTREE_PATH"; then
+    kill "$pid" 2>/dev/null; sleep 1; rm -rf "$d"
+  fi
+done
+```
+
+### 4c — Wrangler account/project cache (per-worktree)
+
+Removed as part of the worktree dir in Step 5 (no separate action
+needed). Listed here as a reminder: if the user later switches
+Cloudflare accounts and keeps a sibling worktree alive, those caches
+live at `<worktree>/.wrangler/cache/` and
+`<worktree>/**/node_modules/.cache/wrangler/`.
+
 Processes found → show list, kill (`kill <pid>`, fallback `kill -9` after 3s).
-Dev servers started from the worktree are always safe to kill without extra
-confirmation — the worktree is being removed.
+Dev servers / brokers / tails started from the worktree are always safe
+to kill without extra confirmation — the worktree is being removed.
 
 ---
 
@@ -249,6 +286,19 @@ Report the resulting state and tracker URL in Step 7's summary.
 ```bash
 cd "$REPO_ROOT"
 git worktree list
+
+# Opportunistic residue sweep — safe to run unconditionally after a batch
+# of /mo-clean cycles. Targets only things that are provably abandoned.
+
+# Dead broker dirs (pid file exists but process is gone)
+for d in /var/folders/*/*/T/cxc-*/ /tmp/cxc-*/; do
+  [[ -f "$d/broker.pid" ]] || continue
+  pid=$(cat "$d/broker.pid" 2>/dev/null)
+  kill -0 "$pid" 2>/dev/null || rm -rf "$d"
+done
+
+# Old Claude Code background-task log files (>1 day old, completed tasks)
+find /private/tmp/claude-*/*/tasks -name "*.output" -mtime +1 -delete 2>/dev/null
 ```
 
 Tell the user:
@@ -256,6 +306,7 @@ Tell the user:
 - What memory entries were written (file names + one-line descriptions,
   or "nothing to capture")
 - Tracker state transition, or "no issue linked"
+- Residue swept (broker dirs, task logs) — exact counts
 - Where they are now (repo root path)
 
 ---
