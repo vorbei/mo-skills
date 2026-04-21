@@ -104,6 +104,7 @@ the bug is incomplete — return to Step 1, do not jump ahead to a fix.
 | Affects 3+ files with no single test that can pinpoint it | Scope too large |
 | The same pattern appears in 3+ places | Should be a refactor |
 | The fix breaks existing tests | Behavioral contract change |
+| Adds a new production abstraction or reusable module that changes ownership boundaries, is used by multiple call sites, or cannot be fully pinned by one failing regression test | Refactor / design work hiding inside a bug fix |
 
 #### 2b. No trigger — assess normally
 
@@ -153,13 +154,34 @@ Run `git diff --stat` to confirm no unrelated drift. Confirm
 `<ARCH_CMD>` still passes. If a store was touched, run the store-scoped
 test suite (project convention).
 
-### Step 5 — Commit and review
+### Step 5 — Commit and the Codex review loop
 
 Commit as `fix(<scope>): description`. Valid scopes come from
-`mo-config.json → commitScopes`. Run `mo-codex review-code` against
-`origin/${BASE_DEFAULT}` (the `mo-codex` skill prompt grades severity).
-Any high-severity finding routes back to Step 1. Ask the user whether
-to create a PR — do not create one automatically.
+`mo-config.json → commitScopes`.
+
+Then run **`mo-codex review-code --base origin/${BASE_DEFAULT}`**. The
+`mo-codex` skill prompt grades severity (P1 / P2 / NITS). The
+follow-up protocol is mandatory, not optional:
+
+1. **P1 and P2 findings are blocking.** Do not open a PR, do not push,
+   do not declare the fix done while any P1 or P2 is open. NITS are
+   the user's call.
+2. For each blocking finding, produce an **independent follow-up
+   commit** with the message shape
+   `fix(<scope>): address review — <one-line summary>`. One commit per
+   logical finding cluster; do not amend the primary fix commit so
+   the review trail stays legible in `git log`.
+3. After each follow-up commit or batch, **re-run
+   `mo-codex review-code`** once. The loop only exits when Codex
+   returns zero P1 / P2, or the user explicitly waives a specific
+   finding (record the waiver rationale in the conversation).
+4. If a Codex finding triggers a 2a mechanical trigger (e.g.
+   "the real fix is in the design-system file we imported from"),
+   stop the review loop and escalate to `/mo-plan` — do not silently
+   grow the bug-fix PR into a refactor.
+
+Ask the user whether to create a PR only after the loop has exited
+cleanly. Never create one automatically.
 
 ---
 
