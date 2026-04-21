@@ -3,7 +3,9 @@
 #
 # Verbs:
 #   review-plan <plan.md> [--effort low|medium|high] [--wait]
-#   review-code [--base <ref>] [--effort ...] [--wait]
+#   review-code [--base <ref>] [--since <ref>] [--plan <path>]
+#               [--prior-findings <path>] [--max-effort <level>]
+#               [--effort ...] [--wait]
 #   handoff <"task text"> [--base <ref>] [--write|--read-only] [--resume|--fresh] [--effort ...] [--model ...] [--wait]
 #   warm [cwd]
 #
@@ -96,35 +98,65 @@ shift || true
 DEFAULT_BASE_BRANCH=$(load_config_value '.base.default' 'dev')
 BASE="origin/${DEFAULT_BASE_BRANCH}"
 EFFORT=""
+MAX_EFFORT=""
 MODEL=""
 WAIT=0
 RAW=0
 WRITE=""
 RESUME=""
+SINCE=""
+PLAN_FILE=""
+PRIOR_FINDINGS=""
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --base)       BASE="$2"; shift 2 ;;
-    --effort)     EFFORT="$2"; shift 2 ;;
-    --model)      MODEL="$2"; shift 2 ;;
-    --wait)       WAIT=1; shift ;;
-    --raw)        RAW=1; shift ;;
-    --write)      WRITE="--write"; shift ;;
-    --read-only)  WRITE=""; shift ;;
-    --resume)     RESUME="--resume-last"; shift ;;
-    --fresh)      RESUME=""; shift ;;
+    --base)            BASE="$2"; shift 2 ;;
+    --since)           SINCE="$2"; shift 2 ;;
+    --plan)            PLAN_FILE="$2"; shift 2 ;;
+    --prior-findings)  PRIOR_FINDINGS="$2"; shift 2 ;;
+    --effort)          EFFORT="$2"; shift 2 ;;
+    --max-effort)      MAX_EFFORT="$2"; shift 2 ;;
+    --model)           MODEL="$2"; shift 2 ;;
+    --wait)            WAIT=1; shift ;;
+    --raw)             RAW=1; shift ;;
+    --write)           WRITE="--write"; shift ;;
+    --read-only)       WRITE=""; shift ;;
+    --resume)          RESUME="--resume-last"; shift ;;
+    --fresh)           RESUME=""; shift ;;
     --) shift; POSITIONAL+=("$@"); break ;;
     -h|--help) usage ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
 done
 
+# Default prior-findings: auto-pick .mo-codex-prior.md in cwd if present.
+# Lets the common "2nd round of review" flow work without any flag.
+if [[ -z "${PRIOR_FINDINGS}" && -f "${PWD}/.mo-codex-prior.md" ]]; then
+  PRIOR_FINDINGS="${PWD}/.mo-codex-prior.md"
+fi
+
 # ------- warm verb: prewarm the per-cwd codex broker (no Codex call) -------
 if [[ "${VERB}" == "warm" ]]; then
   TARGET_CWD="${POSITIONAL[0]:-$PWD}"
   exec node "${SCRIPT_DIR}/warm-broker.mjs" "${TARGET_CWD}"
 fi
+
+# ------- broker pre-flight: remove dirs whose broker PID is dead -------
+# A session that crashed or was hard-killed leaves behind
+# /var/folders/*/*/T/cxc-*/ (or /tmp/cxc-*/ on Linux) with a stale
+# broker.sock. The next job can queue behind those ghosts and hang
+# silently. Cheap sweep: only delete dirs whose pidfile refers to a
+# process that no longer exists. Never touches live brokers.
+for broker_dir in /var/folders/*/*/T/cxc-*/ /tmp/cxc-*/; do
+  [[ -d "${broker_dir}" ]] || continue
+  pidfile="${broker_dir}broker.pid"
+  [[ -f "${pidfile}" ]] || continue
+  pid=$(cat "${pidfile}" 2>/dev/null)
+  if [[ -z "${pid}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
+    rm -rf "${broker_dir}" 2>/dev/null || true
+  fi
+done
 
 # ------- resolve git worktree root (fail fast in non-repo containers) -------
 ANCHOR="${PWD}"
@@ -169,7 +201,8 @@ if [[ -z "${EFFORT}" ]]; then
       ;;
     review-code)
       git fetch --quiet origin "${BASE_BRANCH}" 2>/dev/null || true
-      shortstat=$(git diff --shortstat "${BASE}...HEAD" 2>/dev/null || true)
+      DIFF_REF="${SINCE:-${BASE}}"
+      shortstat=$(git diff --shortstat "${DIFF_REF}...HEAD" 2>/dev/null || true)
       ins=$(printf '%s' "${shortstat}" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || true)
       dels=$(printf '%s' "${shortstat}" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || true)
       total=$(( ${ins:-0} + ${dels:-0} ))
@@ -180,9 +213,19 @@ if [[ -z "${EFFORT}" ]]; then
       else
         EFFORT="high"
       fi
-      echo "mo-codex: auto-effort=${EFFORT} (diff=${total} lines vs ${BASE})" >&2
+      echo "mo-codex: auto-effort=${EFFORT} (diff=${total} lines vs ${DIFF_REF})" >&2
       ;;
   esac
+fi
+
+# Cap auto-effort at the user-specified ceiling. Lets you force a fast
+# turnaround even when the diff is big (e.g. mass rename / refactor noise).
+if [[ -n "${MAX_EFFORT}" && -n "${EFFORT}" ]]; then
+  rank() { case "$1" in low) echo 0 ;; medium) echo 1 ;; high) echo 2 ;; *) echo -1 ;; esac; }
+  if (( $(rank "${EFFORT}") > $(rank "${MAX_EFFORT}") )); then
+    echo "mo-codex: capping effort ${EFFORT} → ${MAX_EFFORT} (--max-effort)" >&2
+    EFFORT="${MAX_EFFORT}"
+  fi
 fi
 
 if [[ "${VERB}" == "handoff" && -z "${WRITE}" && -z "${RESUME}" ]]; then
@@ -256,24 +299,49 @@ EOF
 
     review-code)
       git fetch --quiet origin "${BASE_BRANCH}" 2>/dev/null || true
+      local diff_ref="${SINCE:-${BASE}}"
       local diff_stat
-      diff_stat=$(git diff --stat "${BASE}...HEAD" 2>/dev/null || echo "(no git diff available)")
-      cat <<EOF
-Review the current branch's code changes against base ref \`${BASE}\`.
+      diff_stat=$(git diff --stat "${diff_ref}...HEAD" 2>/dev/null || echo "(no git diff available)")
 
-Important: \`${BASE}\` is the authoritative base. Do NOT substitute the local
-branch of the same name — local refs are often stale after rebases.
+      local plan_section=""
+      if [[ -n "${PLAN_FILE}" && -f "${PLAN_FILE}" ]]; then
+        plan_section=$'\n\n## Acceptance criteria from the plan\n\n'
+        plan_section+="The plan at \`${PLAN_FILE}\` captures the author's intended behaviour. "
+        plan_section+="**Anchor your judgment to the plan's Acceptance Scenarios / Requirements "
+        plan_section+="Trace / Success Criteria** — those are the bar this PR is trying to clear, "
+        plan_section+="not your own re-derivation. Findings that fall outside the plan's stated "
+        plan_section+=$'scope should be filed as P2 (scope) rather than P0/P1 (blocking).\n\n'
+        plan_section+="Read \`${PLAN_FILE}\` now, in full, before reading the diff."
+      fi
+
+      local prior_section=""
+      if [[ -n "${PRIOR_FINDINGS}" && -f "${PRIOR_FINDINGS}" ]]; then
+        prior_section=$'\n\n## Prior review findings\n\n'
+        prior_section+="The file \`${PRIOR_FINDINGS}\` lists what was raised on the last review pass. "
+        prior_section+="For every finding you report, tag it either **[NEW]** (not in the prior review) "
+        prior_section+="or **[REPEAT: <short ref to prior item>]** (same concern resurfacing). "
+        prior_section+="Repeat findings must justify why they still matter after the author already saw them once — "
+        prior_section+="if the author consciously declined and the justification is weak, prefer tagging them P2 / NITS "
+        prior_section+=$'over repeating a P0/P1. Do NOT re-litigate settled decisions.\n\n'
+        prior_section+="Read \`${PRIOR_FINDINGS}\` now, before reading the diff."
+      fi
+
+      cat <<EOF
+Review the current branch's code changes against base ref \`${diff_ref}\`.
+
+Important: \`${BASE}\` is the authoritative target. Do NOT substitute the
+local branch of the same name — local refs are often stale after rebases.
 
 Start by running:
-  git diff ${BASE}...HEAD
-  git log --oneline ${BASE}..HEAD
+  git diff ${diff_ref}...HEAD
+  git log --oneline ${diff_ref}..HEAD
 
 Diff stat preview:
 ${diff_stat}
 
 If the repo has project-specific architecture or policy docs (e.g. a
 harness/ directory, AGENTS.md, or CLAUDE.md), read them first and apply
-their rules to the diff — do not invent rules that are not there.
+their rules to the diff — do not invent rules that are not there.${plan_section}${prior_section}
 
 Evaluate the diff for:
 - Correctness, edge cases, error propagation.
@@ -283,8 +351,25 @@ Evaluate the diff for:
 - Test coverage of the changed lines.
 - Anything that should block landing.
 
-Do not edit any files. Return findings ordered by severity, then a final
-verdict line: LGTM / NITS / CHANGES REQUESTED / BLOCK.
+Do not edit any files. Return **each finding tagged with a severity**:
+
+- **[P0]** blocks landing — production bug, data loss, security hole,
+  contract break. If any P0 is present the verdict is CHANGES REQUESTED.
+- **[P1]** should be fixed before merge but the author could argue —
+  correctness gaps in edge cases, missing tests on risky code, arch-lint
+  violations.
+- **[P2]** nice-to-have — style, naming, minor refactor suggestions,
+  scope-expansion candidates. These are FYI, not blocking.
+
+Order findings within each severity by the cost of ignoring them. Each
+finding must name the exact file:line, state the concrete risk (not a
+vague worry), and propose a fix.
+
+Final verdict line, chosen by the highest-severity finding:
+  BLOCK (P0, and it's unrecoverable without structural rework) /
+  CHANGES REQUESTED (any P0 or multiple P1) /
+  NITS (only P2, author's call) /
+  LGTM (nothing worth noting).
 EOF
       ;;
 
