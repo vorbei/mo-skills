@@ -79,6 +79,16 @@ Pin down before you hypothesize:
   live.
 - **What was already tried** — and what evidence was gathered from each
   attempt (not just "didn't work").
+- **Production signal (lightweight, ~5 min cap)** — if the project has
+  Sentry / APM / EKS logs / metrics dashboards available AND
+  authenticated, glance for the symptom's error signature: how many
+  users hit it, first-seen timestamp vs. recent deploys / releases,
+  any attached stack trace or request context. This is
+  **frame-gathering, not root-cause probing** — the goal is impact
+  scale and recent-delta correlation, not diagnosis. Skip cleanly
+  if nothing is configured, if access is not available, or if the
+  signal is noisy / unrelated; deeper log and metrics dives belong
+  in Step 3's cheap-probe list.
 
 **Question every "known" fact.** Treat the user's assumptions about the
 cause as untested hypotheses. "The backend is returning the wrong data"
@@ -110,6 +120,21 @@ Present hypotheses as a table:
 | 3 | … | … | … | low |
 
 Do not rank by plausibility at this stage. Rank by **cost to falsify**.
+
+**Before moving on, check for compound causes.** Many real-world bugs
+turn out to be two independent issues colliding (a null-id race *and*
+a state-overwrite bug; an auth redirect *and* a stale cache). Ask:
+
+- Are these hypotheses **mutually exclusive**, or could two or more be
+  **simultaneously true**?
+- If two hypotheses could co-exist without contradiction, add a
+  **union row** to the table — treated as its own hypothesis with its
+  own `Predicts`, `Excludes`, and `Cost` columns.
+
+Giveaway for compound-bug territory: the user's symptom description
+has "and also …" / "plus sometimes …" / "even after X, Y still
+happens." When in doubt, add the union row and let Step 3's probes
+falsify it.
 
 ---
 
@@ -143,14 +168,31 @@ If all three are falsified, generate three more. Do not force-fit.
 
 Only declare a root cause when:
 
-1. Exactly one hypothesis is fully consistent with every piece of
-   evidence gathered.
-2. At least two others have been actively falsified (not just "seems
-   less likely").
-3. You can state the cause as a single sentence: *"X happens because Y
-   at location Z, triggered by condition W."*
+1. **One hypothesis (which may be a union row) is fully consistent
+   with every piece of evidence gathered.** A single claim or an
+   explicit union of two co-existing claims both qualify; a vague
+   "probably some of each" does not.
+2. At least two other hypotheses have been actively falsified (not
+   just "seems less likely").
+3. You can state the cause as a single sentence — or, for a union,
+   as two sentences joined with an explicit "and":
+   *"X happens because Y at location Z, triggered by W **and** because
+   of independent issue Q at location R."* The `and` is load-bearing
+   — it forces you to commit to both parts, not hand-wave.
 
-If the surviving hypothesis is a decision-drift per Step 2's
+**Compound-cause convergence guard.** Before declaring done, run this
+check explicitly:
+
+> Could any falsified or surviving hypothesis **co-exist** with the
+> declared root cause without contradicting the evidence? If yes,
+> the declared cause is incomplete — return to Step 2 and add the
+> missing claim to a union row.
+
+This catches the common "we fixed one layer of a two-layer bug" trap
+(the fix passes the original red-light test but a closely related
+symptom reappears in QA or production).
+
+If the surviving hypothesis is a decision-drift per the harness
 `DECISIONS.md` check, say so explicitly — the fix is "enforce the
 decision."
 
