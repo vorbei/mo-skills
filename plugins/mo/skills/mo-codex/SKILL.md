@@ -50,10 +50,52 @@ answer or edit directly.
 
 ```
 mo-codex review-plan <plan.md> [--effort low|medium|high] [--wait] [--raw]
-mo-codex review-code [--base <ref>] [--effort ...] [--wait] [--raw]
+mo-codex review-code [--base <ref>] [--since <ref>] [--plan <path>]
+                     [--prior-findings <path>] [--max-effort <level>]
+                     [--effort ...] [--wait] [--raw]
 mo-codex handoff "<task text>" [--base <ref>] [--write|--read-only] [--resume|--fresh] [--effort ...] [--model ...] [--wait] [--raw]
 mo-codex warm [cwd]
 ```
+
+### `review-code` iteration flags
+
+The default `review-code` diffs `origin/<base>...HEAD` and reviews with
+no prior context — fine for the first review pass on a branch. On
+repeat rounds a few flags keep the review fast and focused:
+
+- `--since <ref>` — diff `<ref>...HEAD` instead of
+  `origin/<base>...HEAD`. Pass the SHA of the last-reviewed commit so
+  round 2 only sees the work added after round 1. Avoids re-reading
+  the full branch on every round; shrinks auto-effort too.
+- `--plan <path>` — include a plan file as context. Codex anchors its
+  judgment to the plan's **Acceptance Scenarios / Requirements Trace /
+  Success Criteria**. Findings outside the plan's stated scope get
+  filed as P2 (scope), not as P0/P1 blockers. Cuts scope creep in
+  review rounds.
+- `--prior-findings <path>` — path to last round's verdict text. Codex
+  tags each finding `[NEW]` or `[REPEAT: <prior ref>]` and is
+  instructed to prefer P2 / NITS for repeats the author consciously
+  declined. Defaults to `./.mo-codex-prior.md` if that file exists, so
+  saving the previous verdict as that filename makes iteration
+  automatic.
+- `--max-effort low|medium|high` — cap the auto-selected effort. Use
+  when a PR has a big line count (rename / mass refactor) but the
+  actual review scope is small. `--max-effort medium` trades thinking
+  depth for turnaround.
+
+Severity schema the prompt now enforces: every finding is tagged
+**[P0]** (blocks landing), **[P1]** (should fix before merge, arguable),
+or **[P2]** (nice-to-have). Verdict is driven by the highest severity:
+`BLOCK` / `CHANGES REQUESTED` / `NITS` / `LGTM`.
+
+### Broker pre-flight
+
+Every invocation sweeps dead broker dirs under
+`/var/folders/*/*/T/cxc-*/` and `/tmp/cxc-*/` before submitting the
+job. A pidfile pointing at a non-existent PID marks a zombie from a
+previous interrupted session; those queued behind real brokers and
+silently stalled new jobs in prior versions. Live brokers are never
+touched.
 
 `warm` prewarms the per-cwd Codex broker without submitting a task.
 Idempotent (no-op if already alive). Does not consume Codex credit. Call
