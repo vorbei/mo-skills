@@ -113,18 +113,29 @@ the bug is incomplete — return to Step 1, do not jump ahead to a fix.
 | Single file with a clear logic error or boundary miss | Small fix | Go directly to Step 3 |
 | Multiple files, or the same pattern in fewer than 3 places | Medium fix | Use the template below to discuss with the user, then Step 3 on approval |
 
-**Medium-fix proposal template:**
+**Medium-fix proposal template — Decision Voice** (see
+`../_shared/decision-voice.md`):
 
 ```
-Bug analysis:
-- Root cause: [one sentence]
-- Affected files: [list]
-- Fix plan: 1. ... 2. ... 3. ...
-- Risk: [does this touch adjacent features?]
-- Size: [file count + line count]
+[One-sentence user-visible symptom — what the user actually experiences]
 
-Proceed?
+我倾向 <one-sentence fix phrased as user outcome>, 理由是 <why>.
+
+如果你更想 <one-sentence alternative, also as user outcome>, 说一声.
+
+(Touches <N> files · 风险: <one line, e.g. "同一组件的两个其他用法
+不受影响" / "会顺带改动 onboarding 路径">)
 ```
+
+Do **not** lead the ask with "Root cause / Affected files / Fix plan /
+Size" bullets — those are internal reasoning. The user-facing ask is
+one short stanza: symptom → recommendation → alternative → one-line
+risk. If the user wants the file list or implementation detail, they
+will ask; offer it in a follow-up turn, not in the ask itself.
+
+If the choice is genuinely single-path (no credible alternative),
+skip the "如果你更想 …" line and just state the symptom, the fix, and
+the risk, then proceed to Step 3 unless the user objects.
 
 ### Step 3 — Fix and green-light
 
@@ -162,6 +173,16 @@ Commit as `fix(<scope>): description`. Valid scopes come from
 Then run **`mo-codex review-code --base origin/${BASE_DEFAULT}`**. The
 `mo-codex` skill prompt grades severity (P1 / P2 / NITS). The
 follow-up protocol is mandatory, not optional:
+
+0. **Pre-digest before escalating.** Do not forward Codex's finding
+   list raw to the user. For each finding, decide what you would do
+   if the user delegated to you: apply silently (P1/P2 that are
+   uncontroversial corrections), reject silently (NITS you disagree
+   with, noted in the conversation), or **escalate** (only findings
+   where the user's preference genuinely changes the fix). Escalations
+   follow `../_shared/decision-voice.md` — lead with "我倾向 X,
+   理由是 Y", one question at a time, frame as user outcome not
+   mechanism.
 
 1. **P1 and P2 findings are blocking.** Do not open a PR, do not push,
    do not declare the fix done while any P1 or P2 is open. NITS are

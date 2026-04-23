@@ -48,6 +48,26 @@ defaults silently.
 
 If empty, ask: "What should I plan?"
 
+### Upstream routing to `/ce-brainstorm`
+
+If the input describes **what to build** at the product level (primary
+user / desired outcome / flow shape still unresolved) rather than
+**how to build** a known thing, stop before the ce:plan workflow and
+recommend `/ce-brainstorm` first — planning a shape that hasn't been
+decided is exactly what produces the "too technical" escalation loop
+later. `ce:plan` Phase 0.4 will also route here downstream, but
+catching it upstream saves the research pass. Signals:
+
+- Input is a question about direction ("should we do X or Y?",
+  "what's the right shape for …")
+- No clear primary actor or single-sentence user outcome
+- Scope is "an area" ("the dock", "the chat experience") rather than
+  a specific behavior change
+
+When in doubt, ask the user once — Decision Voice style — whether they
+want brainstorm or plan: "看起来形态还没定，我倾向先 `/ce-brainstorm`
+把用户路径对齐再回来。要直接进规划吗？"
+
 ## Project overlays
 
 ### Before starting
@@ -177,14 +197,27 @@ grounding rules — do not add a custom prompt. Tag each finding ✅ agree /
 patch the plan and regenerate the QG table. `NEEDS REVISION` (or
 `RETHINK APPROACH`) must be resolved before delivery.
 
-### Output voice
+### Output voice — Decision Voice
 
-Scale conversational output with stakes — routine decisions in one
-sentence; notable decisions (multi-file blast radius, departures from
-baseline) in one paragraph, conclusion first; critical decisions
-(architecture, contracts, provenance) get the full treatment with
-alternatives and residual risk. QG and Provenance tables are structured
-data — write them verbatim regardless of voice grading.
+See `../_shared/decision-voice.md`. Every user-facing question raised
+during planning (approach fork, scope confirm, Codex `review-plan`
+verdict handoff, worktree-conflict confirm) follows the five rules:
+lead with your recommendation, frame options as user outcomes (not
+mechanisms), ≤1 blocking question with ≤2 options, pre-digest Codex
+findings before escalating, stakes-scaled brevity.
+
+Specifically for the Codex `review-plan` handoff above: do not paste
+the `APPROACH NEEDS ADJUSTMENT: 1/2/3` list verbatim. For each finding,
+decide what you'd do if the user delegated to you — apply the
+uncontroversial ones silently, then escalate only the subset where the
+user's preference genuinely changes the plan, each framed as a
+user/product outcome.
+
+The Quality Gate Evidence and Provenance Granularity Check tables are
+*structured data*, not decisions — write them verbatim regardless of
+voice grading. The Decision Voice ask *about* the tables (e.g. "QG has
+2 ⚠️, I suggest fixing #4 before delivery — OK?") still follows the
+rules.
 
 ## What's next
 

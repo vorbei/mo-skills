@@ -200,6 +200,31 @@ decision."
 
 ## Step 5 — Hand-off
 
+### 5a — User-facing summary (Decision Voice)
+
+Before the routing table below, present the result to the user
+following `../_shared/decision-voice.md`. The hypothesis table from
+Step 2 and the evidence log from Step 3 are *internal reasoning* —
+they do not go to the user in the ask. Collapse to:
+
+```
+最可能的原因: <one sentence, file:line 可选>
+置信度: 高 / 中 / 低 — <why, one line>
+
+建议: <cheapest next step phrased as outcome, e.g. "让 /mo-fix 写一条
+回归用例并修掉"> / <alternative if one exists, else omit>
+
+(需要你拍板的一件事: <one question, or omit if none>)
+```
+
+The full hypothesis table + evidence log still flow *internally* to the
+downstream skill (`/mo-fix` or `/mo-plan`) via the handoff packet — they
+need the detail, the user does not. If the investigation is
+inconclusive, the user ask is still one sentence + one proposed next
+probe, not the full table.
+
+### 5b — Routing
+
 Root cause known → route to the right follow-up skill:
 
 | Situation | Skill | Why |

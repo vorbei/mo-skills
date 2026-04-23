@@ -138,6 +138,19 @@ import, move the JSX back into the view file before proceeding.
 Ask the user whether to create a PR — do not create one automatically.
 After the PR exists, display `Base: X ← Head: Y` and the URL.
 
+### Escalation voice — Decision Voice
+
+Any time `/mo-work` pauses to ask the user — scope expansion beyond
+the plan, merge conflict resolution, failing test that needs a
+judgment call, subagent diff divergence, PR creation confirm, design
+docs flag an unresolved UX choice — follow
+`../_shared/decision-voice.md`. Lead with your recommendation, frame
+options as user outcomes (not "change `absolute` to `fixed`"), ≤1
+blocking question with ≤2 options. For codex review findings relayed
+from `mo-codex review-code`, apply the pre-digest rule from
+`/mo-fix` Step 5.0. Routine commit-level choices (commit message,
+which file to stage first) are *not* Decision Voice — just proceed.
+
 ## What's next
 
 | Situation | Skill |
