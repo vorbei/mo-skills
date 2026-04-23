@@ -102,7 +102,7 @@ or **[P2]** (nice-to-have). Verdict is driven by the highest severity:
 the raw finding list and verdict — that is for the calling agent, not
 the user. When the calling skill (`/mo-fix`, `/mo-work`, `/mo-plan`)
 forwards findings to the user, it must pre-digest per
-`../_shared/decision-voice.md`: apply uncontroversial P1/P2 findings
+`../../references/decision-voice.md`: apply uncontroversial P1/P2 findings
 silently, reject NITS you disagree with silently, and escalate only
 the subset where the user's preference materially changes the fix —
 each framed as a user/product outcome with a leading recommendation.

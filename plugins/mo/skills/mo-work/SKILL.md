@@ -151,7 +151,7 @@ Any time `/mo-work` pauses to ask the user — scope expansion beyond
 the plan, merge conflict resolution, failing test that needs a
 judgment call, subagent diff divergence, PR creation confirm, design
 docs flag an unresolved UX choice — follow
-`../_shared/decision-voice.md`. Lead with your recommendation, frame
+`../../references/decision-voice.md`. Lead with your recommendation, frame
 options as user outcomes (not "change `absolute` to `fixed`"), ≤1
 blocking question with ≤2 options. For codex review findings relayed
 from `mo-codex review-code`, apply the pre-digest rule from

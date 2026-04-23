@@ -203,7 +203,7 @@ decision."
 ### 5a — User-facing summary (Decision Voice)
 
 Before the routing table below, present the result to the user
-following `../_shared/decision-voice.md`. The hypothesis table from
+following `../../references/decision-voice.md`. The hypothesis table from
 Step 2 and the evidence log from Step 3 are *internal reasoning* —
 they do not go to the user in the ask. Collapse to:
 

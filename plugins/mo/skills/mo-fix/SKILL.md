@@ -114,7 +114,7 @@ the bug is incomplete — return to Step 1, do not jump ahead to a fix.
 | Multiple files, or the same pattern in fewer than 3 places | Medium fix | Use the template below to discuss with the user, then Step 3 on approval |
 
 **Medium-fix proposal template — Decision Voice** (see
-`../_shared/decision-voice.md`):
+`../../references/decision-voice.md`):
 
 ```
 [One-sentence user-visible symptom — what the user actually experiences]
@@ -196,7 +196,7 @@ Follow-up protocol (applies to whichever reviewer ran):
    corrections), reject silently (items you disagree with, noted in
    the conversation), or **escalate** (only findings where the
    user's preference genuinely changes the fix). Escalations follow
-   `../_shared/decision-voice.md` — lead with "我倾向 X, 理由是 Y",
+   `../../references/decision-voice.md` — lead with "我倾向 X, 理由是 Y",
    one question at a time, frame as user outcome not mechanism.
 
 1. **P0 and P1 findings are blocking** (ce-code-review severity) or

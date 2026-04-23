@@ -199,7 +199,7 @@ patch the plan and regenerate the QG table. `NEEDS REVISION` (or
 
 ### Output voice — Decision Voice
 
-See `../_shared/decision-voice.md`. Every user-facing question raised
+See `../../references/decision-voice.md`. Every user-facing question raised
 during planning (approach fork, scope confirm, Codex `review-plan`
 verdict handoff, worktree-conflict confirm) follows the five rules:
 lead with your recommendation, frame options as user outcomes (not

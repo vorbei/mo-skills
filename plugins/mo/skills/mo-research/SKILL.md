@@ -71,7 +71,7 @@ first if its schema isn't loaded). Read the input and identify every
 place where you have 2+ plausible interpretations — scope, intent,
 constraints, approach, priority. Ask about those specifically.
 
-**How to ask** — follow `../_shared/decision-voice.md`:
+**How to ask** — follow `../../references/decision-voice.md`:
 
 - Present choices tailored to the actual input, not generic
   categories. Options come from the ambiguities in *this* input
@@ -212,7 +212,7 @@ Skip if the solution is trivially safe.
 ## Handoff — Decision Voice
 
 After presenting findings, route the user to the right next step.
-Per `../_shared/decision-voice.md`, lead with your recommendation
+Per `../../references/decision-voice.md`, lead with your recommendation
 and cap the choice at ≤2 options:
 
 - **Default (non-trivial work):** recommend `/mo-plan` with this
@@ -262,7 +262,7 @@ Wait for the user's choice. Don't auto-pivot into any of them.
 - **Match agent count to problem size.** Don't launch 4 agents for
   a one-file bug; don't launch 1 agent for a cross-layer refactor.
 - **Every user-facing question** — Steps 1, 4, and the handoff —
-  follows `../_shared/decision-voice.md`.
+  follows `../../references/decision-voice.md`.
 
 ## Self-revision hook
 
