@@ -165,41 +165,60 @@ Run `git diff --stat` to confirm no unrelated drift. Confirm
 `<ARCH_CMD>` still passes. If a store was touched, run the store-scoped
 test suite (project convention).
 
-### Step 5 — Commit and the Codex review loop
+### Step 5 — Commit and the review loop
 
 Commit as `fix(<scope>): description`. Valid scopes come from
 `mo-config.json → commitScopes`.
 
-Then run **`mo-codex review-code --base origin/${BASE_DEFAULT}`**. The
-`mo-codex` skill prompt grades severity (P1 / P2 / NITS). The
-follow-up protocol is mandatory, not optional:
+**Default reviewer:** `ce-code-review mode:headless
+base:origin/${BASE_DEFAULT}`. It dispatches persona subagents in
+parallel (correctness / testing / maintainability / security / perf /
+reliability / contract / migrations / stack-specific), returns a
+structured finding envelope, and can auto-apply `safe_auto` fixes.
+Subagent contexts are isolated, so the cost to the main conversation
+is bounded to the merged envelope.
 
-0. **Pre-digest before escalating.** Do not forward Codex's finding
-   list raw to the user. For each finding, decide what you would do
-   if the user delegated to you: apply silently (P1/P2 that are
-   uncontroversial corrections), reject silently (NITS you disagree
-   with, noted in the conversation), or **escalate** (only findings
-   where the user's preference genuinely changes the fix). Escalations
-   follow `../_shared/decision-voice.md` — lead with "我倾向 X,
-   理由是 Y", one question at a time, frame as user outcome not
-   mechanism.
+**Cross-model gate (opt-in):** `mo-codex review-code --base
+origin/${BASE_DEFAULT} [--plan <plan>] [--prior-findings
+.mo-codex-prior.md]` runs Codex/GPT as an independent second opinion.
+**Do not default to mo-codex** — see
+`feedback_mo_codex_slow.md` in per-project memory: it is slow and
+frequently blocks in practice. Use it only when the change warrants a
+cross-model sanity check (security, migration, contract-breaking
+changes) or when the user explicitly asks. For plan-level review,
+`mo-codex review-plan` stays the right tool — ce has no equivalent.
 
-1. **P1 and P2 findings are blocking.** Do not open a PR, do not push,
-   do not declare the fix done while any P1 or P2 is open. NITS are
-   the user's call.
+Follow-up protocol (applies to whichever reviewer ran):
+
+0. **Pre-digest before escalating.** Do not forward the raw finding
+   list to the user. For each finding, decide what you would do if
+   the user delegated to you: apply silently (uncontroversial
+   corrections), reject silently (items you disagree with, noted in
+   the conversation), or **escalate** (only findings where the
+   user's preference genuinely changes the fix). Escalations follow
+   `../_shared/decision-voice.md` — lead with "我倾向 X, 理由是 Y",
+   one question at a time, frame as user outcome not mechanism.
+
+1. **P0 and P1 findings are blocking** (ce-code-review severity) or
+   **P1 and P2 are blocking** (mo-codex severity — the scales are
+   offset by one). Do not open a PR, do not push, do not declare the
+   fix done while any blocking finding is open. Lower-severity items
+   are the user's call.
 2. For each blocking finding, produce an **independent follow-up
    commit** with the message shape
    `fix(<scope>): address review — <one-line summary>`. One commit per
    logical finding cluster; do not amend the primary fix commit so
    the review trail stays legible in `git log`.
-3. After each follow-up commit or batch, **re-run
-   `mo-codex review-code`** once. The loop only exits when Codex
-   returns zero P1 / P2, or the user explicitly waives a specific
-   finding (record the waiver rationale in the conversation).
-4. If a Codex finding triggers a 2a mechanical trigger (e.g.
-   "the real fix is in the design-system file we imported from"),
-   stop the review loop and escalate to `/mo-plan` — do not silently
-   grow the bug-fix PR into a refactor.
+3. After each follow-up commit or batch, **re-run the same reviewer**
+   once. For mo-codex, pass `--since <last-reviewed-sha>` and
+   `--prior-findings .mo-codex-prior.md` so it doesn't re-litigate
+   round-1 findings. The loop exits when the reviewer returns zero
+   blocking items, or the user explicitly waives a specific finding
+   (record the waiver rationale in the conversation).
+4. If a finding triggers a 2a mechanical trigger (e.g. "the real fix
+   is in the design-system file we imported from"), stop the review
+   loop and escalate to `/mo-plan` — do not silently grow the bug-fix
+   PR into a refactor.
 
 Ask the user whether to create a PR only after the loop has exited
 cleanly. Never create one automatically.

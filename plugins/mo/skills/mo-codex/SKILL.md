@@ -37,14 +37,24 @@ picks the latest version automatically.
 
 ## When to use
 
+> **Performance note.** Despite the `--background` + streaming design,
+> `mo-codex` is slow in practice and the Codex broker frequently
+> stalls. **Do not default to `review-code`** for every fix/feature
+> pipeline — `/mo-fix` and `/mo-work` now default to
+> `ce-code-review mode:headless` for code review and reserve mo-codex
+> as an opt-in cross-model gate. `review-plan` is the exception: it
+> has no `ce` equivalent for approach-level plan judgment and is
+> worth the wait since it runs once per plan, not per commit.
+
 | Scenario | Verb |
 |---|---|
-| You just wrote a plan with `/mo-plan` and want a second opinion on **whether the approach is the right one** (not on unit sizing, test names, or other implementation details) before `/mo-work` | `review-plan` |
-| You finished work on a feature/fix branch and want a code review against the default base before opening a PR | `review-code` |
+| You just wrote a plan with `/mo-plan` and want a second opinion on **whether the approach is the right one** (not on unit sizing, test names, or other implementation details) before `/mo-work` | `review-plan` (primary use — no ce equivalent) |
+| Cross-model sanity check on a high-stakes change (security, migration, contract break) before PR — after `ce-code-review` has already run | `review-code` (opt-in only) |
 | The current Claude thread is stuck, or the task is open-ended and would burn this thread's context | `handoff` |
 
 For trivial questions or quick edits, do not invoke `mo-codex` — just
-answer or edit directly.
+answer or edit directly. For routine code review, prefer
+`ce-code-review mode:headless`.
 
 ## Verbs
 

@@ -114,10 +114,17 @@ review.
 
 ### Review
 
-After the loop reaches `/simplify`, run `mo-codex review-code` against
-`origin/${BASE_DEFAULT}`. The `mo-codex` skill grades severity per the
-project's own decision / protocol docs; high-severity findings route to
-`/mo-fix`, lower severity is the user's call.
+After the loop reaches `/simplify`, run
+`ce-code-review mode:headless base:origin/${BASE_DEFAULT}` — it
+dispatches persona subagents in parallel with isolated contexts and
+returns a structured finding envelope. High-severity findings (P0/P1)
+route to `/mo-fix`; lower severity is the user's call.
+
+`mo-codex review-code` is available as an **opt-in cross-model gate**
+(Codex/GPT independent second opinion) for changes that warrant it —
+security, migrations, contract breaks, or when the user asks. Do not
+default to it: it is slow and frequently blocks in practice (see
+`feedback_mo_codex_slow.md` in per-project memory).
 
 ### Commit conventions
 
