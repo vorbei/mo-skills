@@ -24,7 +24,7 @@ A plan must include each of these, or the Quality Gate fails:
 |-------------------------------|---------------------------------------------------|------------------------|
 | `Execution note: test-first`  | On every feature-bearing unit                     | Unit body              |
 | `/simplify` unit              | Second-to-last implementation unit                | Implementation Units   |
-| `mo-codex review-plan` unit   | Last implementation unit                          | Implementation Units   |
+| Codex plan review unit        | Last implementation unit (run via `codex exec`)   | Implementation Units   |
 | Issue reference               | In filename and frontmatter when applicable       | Filename / frontmatter |
 | Test file path                | On every feature unit                             | `Files:` field         |
 | Provenance check              | When introducing any flag or annotation field     | Before Units           |
@@ -41,7 +41,7 @@ Every plan must produce an evidence table covering these items:
 - [ ] **Mobile adaptation**: frontend units include mobile checks at the configured `frontend.mobileWidth`
 - [ ] **Provenance granularity**: write-time flags are at least as fine-grained as the transformation they record
 - [ ] `/simplify` is the second-to-last unit
-- [ ] `mo-codex review-plan` is the last unit
+- [ ] Codex plan review (via `codex exec`) is the last unit
 
 **Evidence output (mandatory):** after the plan is written, emit a table with
 one row per checklist item, each carrying ✅ / ❌ / N/A plus a line number or

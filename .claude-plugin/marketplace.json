@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "mo",
-      "description": "Planning + TDD + handoff skills (mo-plan / mo-work / mo-clean / mo-codex / mo-handoff). A thin configurable overlay on ce:plan / ce:work / ce:compound and codex:rescue.",
+      "description": "Planning + TDD + handoff skills (mo-plan / mo-work / mo-clean / mo-handoff). A thin configurable overlay on ce:plan / ce:work / ce:compound. Codex integration uses `codex exec` directly.",
       "version": "0.1.0",
       "author": {
         "name": "vorbei",

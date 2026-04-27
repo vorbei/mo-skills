@@ -112,8 +112,8 @@ Every plan must end with these two units in order:
 
 1. **`/simplify`** — run `<commands.test> && <commands.archLint>` before and
    after; both must be green. See `tdd-and-simplify.md` §4.
-2. **`mo-codex review-plan`** — read-only plan review via the `mo-codex`
-   skill.
+2. **Codex plan review** — read-only plan review via `codex exec` (see
+   "Codex plan review" section below).
 
 ### Worktree creation (standard / deep plans)
 
@@ -124,16 +124,6 @@ the project's primary repo (`project.primaryRepo` in config). Record the
 absolute path back into the plan as `worktree: <abs-path>`. **Stop and ask
 the user** if the branch or directory already exists — never reuse or
 overwrite without confirmation.
-
-**After the worktree is created, prewarm its Codex broker** so the first
-`mo-codex review-plan` or `/mo-work` call inside it is not blocked by the
-1–3s broker spawn:
-
-```bash
-mo-codex warm <absolute-worktree-path>
-```
-
-Idempotent, does not consume Codex credit.
 
 `depth: lightweight` skips this — those go through `/mo-fix` or edit in an
 existing worktree.
@@ -183,31 +173,55 @@ table to the plan file and mirror it in the conversation:
 | 8 | Mobile adaptation | N/A | non-frontend or frontend.enabled=false |
 | 9 | Provenance granularity | ✅ | GRANULARITY OK |
 | 10 | /simplify | ✅ | Unit N-1 |
-| 11 | mo-codex review-plan | ✅ | Unit N |
+| 11 | Codex plan review | ✅ | Unit N |
 ```
 
 N/A entries must carry a reason. On any ❌, fix the plan before delivering.
 
 ### Codex plan review
 
-After the QG table is written, run `mo-codex review-plan <plan-file>`.
-The verb-specific prompt inside `mo-codex` owns the review categories and
-grounding rules — do not add a custom prompt. Tag each finding ✅ agree /
-⚠️ partially agree / ❌ disagree (with reason), let the user decide, then
-patch the plan and regenerate the QG table. `NEEDS REVISION` (or
-`RETHINK APPROACH`) must be resolved before delivery.
+After the QG table is written, hand the plan to Codex via `codex exec`.
+**`cd` into the plan's worktree first** (or any repo dir if the plan has
+no worktree yet) — `codex exec` always uses the current working
+directory; do not rely on `-C` or `--cd` flags.
+
+```bash
+cd "<worktree-path-or-repo-dir>"
+codex exec "$(cat <<'PROMPT'
+You are reviewing an implementation plan. Anchor judgment to the plan's
+Acceptance Scenarios / Requirements Trace / Success Criteria — focus on
+whether the approach is right, not on unit sizing or test names.
+
+Output format:
+- Numbered findings. For each: location in plan → concern → suggestion.
+- Tag each finding [P0] (blocks landing), [P1] (should fix before /mo-work),
+  or [P2] (nice-to-have).
+- Final line, exactly one of:
+  VERDICT: APPROACH SOUND | APPROACH NEEDS ADJUSTMENT | RETHINK APPROACH
+
+Plan file:
+PROMPT
+)
+
+$(cat <plan-file>)"
+```
+
+Tag each returned finding ✅ agree / ⚠️ partially agree / ❌ disagree
+(with reason), let the user decide, then patch the plan and regenerate
+the QG table. `APPROACH NEEDS ADJUSTMENT` or `RETHINK APPROACH` must be
+resolved before delivery.
 
 ### Output voice — Decision Voice
 
 See `../../references/decision-voice.md`. Every user-facing question raised
-during planning (approach fork, scope confirm, Codex `review-plan`
-verdict handoff, worktree-conflict confirm) follows the five rules:
-lead with your recommendation, frame options as user outcomes (not
-mechanisms), ≤1 blocking question with ≤2 options, pre-digest Codex
-findings before escalating, stakes-scaled brevity.
+during planning (approach fork, scope confirm, Codex review verdict
+handoff, worktree-conflict confirm) follows the five rules: lead with
+your recommendation, frame options as user outcomes (not mechanisms),
+≤1 blocking question with ≤2 options, pre-digest Codex findings before
+escalating, stakes-scaled brevity.
 
-Specifically for the Codex `review-plan` handoff above: do not paste
-the `APPROACH NEEDS ADJUSTMENT: 1/2/3` list verbatim. For each finding,
+Specifically for the Codex review handoff above: do not paste the
+`APPROACH NEEDS ADJUSTMENT: 1/2/3` list verbatim. For each finding,
 decide what you'd do if the user delegated to you — apply the
 uncontroversial ones silently, then escalate only the subset where the
 user's preference genuinely changes the plan, each framed as a

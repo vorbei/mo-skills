@@ -1,7 +1,7 @@
 {
   "name": "mo",
   "version": "0.1.0",
-  "description": "Planning + TDD + handoff skills — a thin project overlay on ce:plan / ce:work / ce:compound and codex:rescue.",
+  "description": "Planning + TDD + handoff skills — a thin project overlay on ce:plan / ce:work / ce:compound. Codex integration uses `codex exec` directly.",
   "author": {
     "name": "vorbei",
     "url": "https://github.com/vorbei"

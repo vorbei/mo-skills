@@ -170,25 +170,35 @@ test suite (project convention).
 Commit as `fix(<scope>): description`. Valid scopes come from
 `mo-config.json → commitScopes`.
 
-**Default reviewer:** `ce-code-review mode:headless
-base:origin/${BASE_DEFAULT}`. It dispatches persona subagents in
-parallel (correctness / testing / maintainability / security / perf /
-reliability / contract / migrations / stack-specific), returns a
-structured finding envelope, and can auto-apply `safe_auto` fixes.
-Subagent contexts are isolated, so the cost to the main conversation
-is bounded to the merged envelope.
+**Reviewer:** Codex via `codex exec`. **`cd` into the worktree first**
+— `codex exec` reads the current working directory; do not rely on
+`-C` / `--cd` flags. Fetch the base ref before invoking so the diff is
+current.
 
-**Cross-model gate (opt-in):** `mo-codex review-code --base
-origin/${BASE_DEFAULT} [--plan <plan>] [--prior-findings
-.mo-codex-prior.md]` runs Codex/GPT as an independent second opinion.
-**Do not default to mo-codex** — see
-`feedback_mo_codex_slow.md` in per-project memory: it is slow and
-frequently blocks in practice. Use it only when the change warrants a
-cross-model sanity check (security, migration, contract-breaking
-changes) or when the user explicitly asks. For plan-level review,
-`mo-codex review-plan` stays the right tool — ce has no equivalent.
+```bash
+cd "<worktree-path>"
+git fetch origin "${BASE_DEFAULT}"
+codex exec "$(cat <<'PROMPT'
+You are reviewing a bug fix before PR. Run `git diff origin/<BASE>...HEAD`
+and review the change end to end. If a plan file is referenced in the
+fix, anchor judgment to its Acceptance Scenarios / Success Criteria.
 
-Follow-up protocol (applies to whichever reviewer ran):
+Output format:
+- Numbered findings. For each: file:line → concern → suggestion.
+- Tag each finding [P0] (blocks landing), [P1] (should fix before merge),
+  or [P2] (nice-to-have).
+- Final line, exactly one of:
+  VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+PROMPT
+)"
+```
+
+Replace `<BASE>` in the prompt with `${BASE_DEFAULT}`. On round-2+
+review, append a paragraph in the prompt naming the round-1 findings so
+Codex can tag repeats vs new issues — `codex exec` is one-shot, so
+round-to-round context is the caller's job.
+
+Follow-up protocol:
 
 0. **Pre-digest before escalating.** Do not forward the raw finding
    list to the user. For each finding, decide what you would do if
@@ -199,22 +209,18 @@ Follow-up protocol (applies to whichever reviewer ran):
    `../../references/decision-voice.md` — lead with "我倾向 X, 理由是 Y",
    one question at a time, frame as user outcome not mechanism.
 
-1. **P0 and P1 findings are blocking** (ce-code-review severity) or
-   **P1 and P2 are blocking** (mo-codex severity — the scales are
-   offset by one). Do not open a PR, do not push, do not declare the
-   fix done while any blocking finding is open. Lower-severity items
-   are the user's call.
+1. **P0 and P1 findings are blocking.** Do not open a PR, do not push,
+   do not declare the fix done while any blocking finding is open. P2
+   items are the user's call.
 2. For each blocking finding, produce an **independent follow-up
    commit** with the message shape
    `fix(<scope>): address review — <one-line summary>`. One commit per
    logical finding cluster; do not amend the primary fix commit so
    the review trail stays legible in `git log`.
-3. After each follow-up commit or batch, **re-run the same reviewer**
-   once. For mo-codex, pass `--since <last-reviewed-sha>` and
-   `--prior-findings .mo-codex-prior.md` so it doesn't re-litigate
-   round-1 findings. The loop exits when the reviewer returns zero
-   blocking items, or the user explicitly waives a specific finding
-   (record the waiver rationale in the conversation).
+3. After each follow-up commit or batch, **re-run the codex exec
+   review** once. The loop exits when the review returns zero blocking
+   items, or the user explicitly waives a specific finding (record the
+   waiver rationale in the conversation).
 4. If a finding triggers a 2a mechanical trigger (e.g. "the real fix
    is in the design-system file we imported from"), stop the review
    loop and escalate to `/mo-plan` — do not silently grow the bug-fix

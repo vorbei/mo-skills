@@ -240,7 +240,7 @@ Wait for the user's choice. Don't auto-pivot into any of them.
 | Research resolved the ambiguity, single-file fix | `/mo-fix` |
 | Still exploratory, want lightweight plan dialog | `EnterPlanMode` |
 | Research revealed a settled decision answers this | Point the user at the relevant `DECISIONS.md` entry, stop |
-| Cross-model sanity check on a contested finding | `mo-codex handoff` (opt-in — see `mo-codex` SKILL perf note) |
+| Cross-model sanity check on a contested finding | `codex exec` from inside the relevant repo dir (opt-in) |
 
 ## Rules
 

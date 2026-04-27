@@ -233,10 +233,34 @@ Root cause known → route to the right follow-up skill:
 | Fix would match one of `/mo-fix`'s 2a systemic triggers (design system, API contract, provenance field, 3+ sites) | `/mo-plan` | Needs full Quality Gate, not a bug flow |
 | Decision drift — the "bug" is a violation of an active `DECISIONS.md` entry | `/mo-fix` with the decision cited in the commit message | Signal that the code moved toward the decision, not away from it |
 | Investigation inconclusive after two hypothesis rounds | Surface status to user, do NOT guess | Capture what's known, what's been ruled out, and what probe would cut the remaining space |
-| Second opinion needed | `mo-codex consult` | Hand off the hypothesis table and current evidence, ask Codex to poke holes |
+| Second opinion needed | `codex exec` (in the worktree) | Hand off the hypothesis table and current evidence, ask Codex to poke holes — see snippet below |
 
 Pass the hypothesis table + evidence log forward in the handoff so
 `/mo-fix` or `/mo-plan` doesn't repeat the investigation.
+
+For the second-opinion case, **`cd` into the repo first** — `codex
+exec` reads the current working directory; do not rely on `-C` /
+`--cd` flags:
+
+```bash
+cd "<repo-or-worktree>"
+codex exec "$(cat <<'PROMPT'
+Second opinion on a root-cause investigation. Below are competing
+hypotheses, supporting evidence, and falsified candidates. Poke holes:
+
+- Which surviving hypotheses are weakest, and what cheap probe would
+  discriminate them next?
+- Which hypotheses is the investigator likely missing (compound causes,
+  decision drift, environmental factors)?
+- Is the convergence guard satisfied, or could two surviving claims
+  co-exist as a union root cause?
+
+Investigation packet:
+PROMPT
+)
+
+<paste hypothesis table and evidence log>"
+```
 
 ---
 

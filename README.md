@@ -1,17 +1,17 @@
 # mo-skills
 
 Opinionated planning + TDD + handoff skills for Claude Code. A thin, configurable
-overlay on top of [compound-engineering](https://github.com/every/every-marketplace)
-and the [openai-codex](https://github.com/anthropics/codex) plugins.
+overlay on top of [compound-engineering](https://github.com/every/every-marketplace).
+Codex integration is direct: skills shell out to `codex exec` from inside the
+relevant repo / worktree directory.
 
-Ships five skills:
+Ships four skills:
 
 | Skill | What it does |
 |---|---|
-| `mo-plan` | Writes an implementation plan to a gitignored plan store, enforces a Quality Gate with on-disk evidence, and ends every plan with a `/simplify` unit plus a Codex plan review. |
-| `mo-work` | Executes a plan with strict red-green TDD (two independent runs required), resumes from `- [x]` checkpoints, and routes PR review through `mo-codex review-code`. |
+| `mo-plan` | Writes an implementation plan to a gitignored plan store, enforces a Quality Gate with on-disk evidence, and ends every plan with a `/simplify` unit plus a Codex plan review (via `codex exec`). |
+| `mo-work` | Executes a plan with strict red-green TDD (two independent runs required), resumes from `- [x]` checkpoints, and routes PR review through `codex exec` from inside the worktree. |
 | `mo-clean` | Verifies the current worktree branch is merged, captures session learnings into Claude's auto-memory (ce:compound-style), moves any linked tracker issue to its review state, then removes the worktree and branch. |
-| `mo-codex` | Streaming shell wrapper over `codex-companion.mjs`. Streams within ~1s instead of blocking on the full Codex turn. Three verbs: `review-plan`, `review-code`, `handoff`. |
 | `mo-handoff` | Compresses the current session into a self-contained resume prompt, copied to your clipboard. |
 
 ## Install
@@ -24,15 +24,16 @@ Ships five skills:
 ### External dependencies
 
 `mo-plan` and `mo-work` are *overlays* on `ce:plan` / `ce:work`, and
-`mo-clean` borrows the `ce:compound` methodology. `mo-codex` requires the
-openai-codex plugin.
+`mo-clean` borrows the `ce:compound` methodology. Codex review steps
+shell out to `codex exec`, which requires the standalone Codex CLI on
+`$PATH`.
 
 ```
 /plugin marketplace add every/every-marketplace
 /plugin install compound-engineering
 
-/plugin marketplace add anthropics/codex
-/plugin install codex
+# Install the Codex CLI separately (https://github.com/openai/codex)
+# so `codex exec` is available on $PATH.
 ```
 
 ## Configure
@@ -97,8 +98,9 @@ Full schema: `config/mo-config.schema.json`.
   "tests pass" without command output are unreliable.
 - **Architecture is enforced statically.** `commands.archLint` runs on
   every `/simplify` and acts as a hard gate.
-- **Codex review is streamed, not delegated.** `mo-codex` skips the
-  subagent indirection so output appears within ~1s.
+- **Codex review goes through `codex exec` directly.** Skills `cd` into
+  the relevant worktree and shell out — no subagent indirection, no
+  custom wrapper, no broker process.
 - **English for artifacts, the user's language for conversation.**
   Controlled by `language.{artifacts,conversation}`.
 
@@ -119,9 +121,9 @@ good idea; the skills do not require it.
 
 ```
 idea
-  → /mo-plan       (writes plan to $planStore, passes Quality Gate, runs mo-codex review-plan)
+  → /mo-plan       (writes plan to $planStore, passes Quality Gate, runs codex exec plan review)
   → /mo-work       (strict TDD, resumes from checkpoints, ends with /simplify)
-  → /mo-codex review-code --base origin/<base.default>
+  → cd <worktree> && codex exec "<code-review prompt>"   (against origin/<base.default>)
   → user confirms → PR
   → /mo-clean      (after merge: capture learnings, remove worktree + branch)
 ```

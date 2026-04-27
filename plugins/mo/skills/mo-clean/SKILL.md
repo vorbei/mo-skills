@@ -161,8 +161,8 @@ and skip to Step 4.
 ## Step 4 — Kill services bound to the worktree
 
 Before removing the worktree directory, find and stop any processes
-(dev servers, vite, node, Codex brokers, tail-f on job logs, etc.)
-started from inside it.
+(dev servers, vite, node, tail-f on job logs, leftover `codex exec`
+runs, etc.) started from inside it.
 
 ### 4a — Listening TCP servers
 
@@ -175,30 +175,18 @@ echo "$LISTEN_PIDS" | while read pid name ports; do
 done
 ```
 
-### 4b — Codex brokers + tails bound to the worktree
+### 4b — Stray `codex exec` runs + tails bound to the worktree
 
-Codex `app-server-broker.mjs` binds `--cwd <worktree>` and stays alive
-across sessions. `tail -f` on its per-job log files also lingers.
-Neither listens on TCP, so 4a misses them.
+`codex exec` is one-shot, but a long-running prompt (review, handoff)
+may still be in flight when cleanup starts. `tail -f` on log files
+also lingers. Neither listens on TCP, so 4a misses them.
 
 ```bash
-# Kill any Codex process whose args reference this worktree
-ps aux | grep -E "codex app-server|app-server-broker|task-.*\.log" \
+# Kill any codex process whose args reference this worktree
+ps aux | grep -E "codex( |$)|tail .*\.log" \
   | grep -v grep \
   | grep -F "$WORKTREE_PATH" \
   | awk '{print $2}' | xargs -r kill 2>/dev/null
-
-# Remove the matching broker socket dirs
-for d in /var/folders/*/*/T/cxc-*/ /tmp/cxc-*/; do
-  pidfile="$d/broker.pid"; [[ -f "$pidfile" ]] || continue
-  pid=$(cat "$pidfile" 2>/dev/null)
-  # Dead broker OR broker whose cwd matched this worktree → clean up
-  if ! kill -0 "$pid" 2>/dev/null; then
-    rm -rf "$d"
-  elif ps -p "$pid" -o args= 2>/dev/null | grep -qF "$WORKTREE_PATH"; then
-    kill "$pid" 2>/dev/null; sleep 1; rm -rf "$d"
-  fi
-done
 ```
 
 ### 4c — Wrangler account/project cache (per-worktree)
@@ -210,8 +198,8 @@ live at `<worktree>/.wrangler/cache/` and
 `<worktree>/**/node_modules/.cache/wrangler/`.
 
 Processes found → show list, kill (`kill <pid>`, fallback `kill -9` after 3s).
-Dev servers / brokers / tails started from the worktree are always safe
-to kill without extra confirmation — the worktree is being removed.
+Dev servers / codex runs / tails started from the worktree are always
+safe to kill without extra confirmation — the worktree is being removed.
 
 ---
 

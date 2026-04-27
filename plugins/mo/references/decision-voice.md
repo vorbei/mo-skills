@@ -64,8 +64,9 @@ Every user-facing question a Mo skill raises:
   divergence, PR creation confirmation
 - `/mo-debug` — root-cause handoff (hypothesis table collapsed into
   one-sentence cause + cheapest next step)
-- `/mo-codex` — any finding the calling skill forwards to the user
-  goes through the pre-digest rule
+- `codex exec` review findings — any finding the calling skill
+  (`/mo-plan`, `/mo-work`, `/mo-fix`) forwards to the user goes through
+  the pre-digest rule
 
 **Out of scope:** internal agent↔agent handoffs (plan-unit dispatch to
 a subagent, Codex prompt construction, TDD evidence blocks) get full

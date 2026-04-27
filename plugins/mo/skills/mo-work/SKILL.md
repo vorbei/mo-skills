@@ -114,17 +114,30 @@ review.
 
 ### Review
 
-After the loop reaches `/simplify`, run
-`ce-code-review mode:headless base:origin/${BASE_DEFAULT}` — it
-dispatches persona subagents in parallel with isolated contexts and
-returns a structured finding envelope. High-severity findings (P0/P1)
-route to `/mo-fix`; lower severity is the user's call.
+After the loop reaches `/simplify`, run a Codex code review via
+`codex exec`. **`cd` into the worktree first** — `codex exec` reads the
+current working directory; do not rely on `-C` / `--cd` flags. Fetch
+the base ref before invoking so the diff is current.
 
-`mo-codex review-code` is available as an **opt-in cross-model gate**
-(Codex/GPT independent second opinion) for changes that warrant it —
-security, migrations, contract breaks, or when the user asks. Do not
-default to it: it is slow and frequently blocks in practice (see
-`feedback_mo_codex_slow.md` in per-project memory).
+```bash
+cd "<worktree-path>"
+git fetch origin "${BASE_DEFAULT}"
+codex exec "$(cat <<'PROMPT'
+You are doing a pre-PR code review. Run `git diff origin/<BASE>...HEAD`
+and review the change end to end.
+
+Output format:
+- Numbered findings. For each: file:line → concern → suggestion.
+- Tag each finding [P0] (blocks landing), [P1] (should fix before merge),
+  or [P2] (nice-to-have).
+- Final line, exactly one of:
+  VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+PROMPT
+)"
+```
+
+Replace `<BASE>` in the prompt with `${BASE_DEFAULT}`. P0/P1 findings
+route to `/mo-fix`; P2 / NITS are the user's call.
 
 ### Commit conventions
 
@@ -154,7 +167,7 @@ docs flag an unresolved UX choice — follow
 `../../references/decision-voice.md`. Lead with your recommendation, frame
 options as user outcomes (not "change `absolute` to `fixed`"), ≤1
 blocking question with ≤2 options. For codex review findings relayed
-from `mo-codex review-code`, apply the pre-digest rule from
+from the `codex exec` review above, apply the pre-digest rule from
 `/mo-fix` Step 5.0. Routine commit-level choices (commit message,
 which file to stage first) are *not* Decision Voice — just proceed.
 
@@ -162,7 +175,7 @@ which file to stage first) are *not* Decision Voice — just proceed.
 
 | Situation | Skill |
 |-----------|-------|
-| `mo-codex review-code` found a bug / PR has review notes | `/mo-fix` (if installed) |
+| Codex review found a bug / PR has review notes | `/mo-fix` (if installed) |
 | Frontend implementation done | Project's design-lint skill |
 | Ready to ship | Project's ship workflow |
 

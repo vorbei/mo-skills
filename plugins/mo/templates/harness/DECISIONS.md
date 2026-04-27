@@ -34,7 +34,7 @@
 
 ## Example: PR review uses a single tool
 
-- **Decision:** All pre-merge code review goes through one path (e.g. `mo-codex review-code --base origin/<default>`). Replaces ad-hoc review flows.
+- **Decision:** All pre-merge code review goes through one path (e.g. `cd <worktree> && codex exec "<review prompt>"` against `origin/<default>`). Replaces ad-hoc review flows.
 - **Why:** A single reproducible path matches what the remote will diff; ad-hoc flows use stale local refs.
 - **Status:** Active.
 
