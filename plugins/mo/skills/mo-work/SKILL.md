@@ -6,6 +6,39 @@ argument-hint: "[plan file path or feature description]"
 
 # Mo Work
 
+## Default flow
+
+`/mo-work` is execution-after-plan: a plan exists at `docs/plans/<slug>.md`,
+and this skill drives implementation → review → PR. For non-trivial plans
+(≥3 Units), prefer dispatching to codex `/goal` mode rather than implementing
+in Claude:
+
+```bash
+TASK="MAX-NNN-impl"
+T=$(pool-task.sh acquire-for --wait $TASK codex)
+cat > /tmp/goal-prompt.txt <<EOF
+/goal 实现 {plan-file-path}. Each Unit 内部 TDD（红→绿→commit）。每个 Unit 完成跑 pnpm typecheck && pnpm test && pnpm lint:arch，全绿才进下一个 Unit. 完成后输出 git log + diff stat 概要.
+EOF
+pool-task.sh send "$T" /tmp/goal-prompt.txt
+pool-task.sh wait "$T" --timeout 3600   # /goal can run a long time
+# Don't `done` yet — keep the pane bound to MAX-NNN-impl so /mo-fix can reuse it.
+```
+
+For small plans (1-2 Units, mechanical edits), implement directly in Claude with inline TDD evidence — `/goal` overhead isn't worth it.
+
+Why codex `/goal` for big plans: autonomous goal-driven mode — reads plan, executes U1→U2→U3 sequentially without pausing for "should I continue?" approval loops. The plan IS the contract.
+
+After codex finishes, verify exit gate (whether or not the project has
+`docs/ship-workflow.md` — these gates apply universally):
+- N commits on branch (one per Unit)
+- Triple gate green at HEAD
+- `git status -sb` clean
+- Branch still based on the plan's base SHA (no auto-rebase before review)
+
+Skip dispatch and implement directly in Claude if:
+- Plan doesn't exist (run `/mo-plan` first, or it's a one-line typo fix)
+- Single trivial change (just edit + commit)
+
 > **Reference, not replacement.** This skill is a *project overlay* on `ce:work`.
 
 ## Config
@@ -114,30 +147,73 @@ review.
 
 ### Review
 
-After the loop reaches `/simplify`, run a Codex code review via
-`codex exec`. **`cd` into the worktree first** — `codex exec` reads the
-current working directory; do not rely on `-C` / `--cd` flags. Fetch
-the base ref before invoking so the diff is current.
+After `/simplify`, run review **as two parallel pool agents**, then
+optionally a third Claude-subagent pass for high-stakes diffs. Single-agent
+review misses too much; the policy is codex + opencode in parallel, merge
+findings, route P0/P1 to `/mo-fix`. See [`/mo-plan` § Pool protocol](../mo-plan/SKILL.md#pool-protocol-canonical--referenced-by-other-mo--skills)
+for the acquire / send / wait / done helpers.
 
 ```bash
-cd "<worktree-path>"
-git fetch origin "${BASE_DEFAULT}"
-codex exec "$(cat <<'PROMPT'
-You are doing a pre-PR code review. Run `git diff origin/<BASE>...HEAD`
-and review the change end to end.
+WORKTREE="<absolute-worktree-path>"
+cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
+
+# Two reviewers in parallel — distinct task names so the dispatcher gives
+# each kind its own pane and we can wait on them independently.
+Tc=$(pool-task.sh acquire-for --wait MAX-NNN-rev-cdx codex)
+To=$(pool-task.sh acquire-for --wait MAX-NNN-rev-opc opencode)
+
+OUT_C=$(mktemp -t mo-work-review-codex-XXXXXX.md)
+OUT_O=$(mktemp -t mo-work-review-opencode-XXXXXX.md)
+
+# Same prompt body, distinct OUT files.
+make_prompt() {
+  local OUT="$1"
+  cat <<PROMPT_EOF
+Working directory: $WORKTREE
+Use your shell tool with that absolute cwd. Run
+  git diff origin/${BASE_DEFAULT}...HEAD
+and do a pre-PR code review end to end.
 
 Output format:
 - Numbered findings. For each: file:line → concern → suggestion.
-- Tag each finding [P0] (blocks landing), [P1] (should fix before merge),
-  or [P2] (nice-to-have).
-- Final line, exactly one of:
-  VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
-PROMPT
-)"
+- Tag each [P0] (blocks landing) / [P1] (should fix before merge) / [P2] (nice-to-have).
+- Final line, exactly: VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+
+When done, write your COMPLETE output (findings + VERDICT) to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
+PROMPT_EOF
+}
+P_C=$(mktemp -t prompt-cdx-XXXXXX.txt); make_prompt "$OUT_C" > "$P_C"
+P_O=$(mktemp -t prompt-opc-XXXXXX.txt); make_prompt "$OUT_O" > "$P_O"
+pool-task.sh send "$Tc" "$P_C" && rm "$P_C"
+pool-task.sh send "$To" "$P_O" && rm "$P_O"
+
+# Wait both. They run concurrently — total wall time = max(codex, opencode),
+# not sum. wait blocks per-pane; do them sequentially or background them.
+pool-task.sh wait "$Tc" --timeout 900 &
+pool-task.sh wait "$To" --timeout 900 &
+wait
+[[ -s "$OUT_C" ]] || tmux capture-pane -t "$Tc" -p -S -300 > "$OUT_C"
+[[ -s "$OUT_O" ]] || tmux capture-pane -t "$To" -p -S -300 > "$OUT_O"
+pool-task.sh done "$Tc"
+pool-task.sh done "$To"
+
+# Merge: both flag = high-confidence fix; one flag + valid = judge by P-tag;
+# conflicting verdicts → adjudicate by plan + project conventions.
+REVIEW_CODEX=$(cat "$OUT_C")
+REVIEW_OPENCODE=$(cat "$OUT_O")
 ```
 
-Replace `<BASE>` in the prompt with `${BASE_DEFAULT}`. P0/P1 findings
-route to `/mo-fix`; P2 / NITS are the user's call.
+**Optional third pass — Claude subagent.** For high-stakes diffs (auth,
+payments, migrations, public APIs, anything you'd hesitate to land at 5pm
+Friday), follow the parallel pool review with `ce-code-review mode:report-only base:origin/${BASE_DEFAULT}`
+as a Claude-subagent third pass. It reads the diff into its own context and
+produces its own findings list, which you merge into the same P0/P1/P2
+buckets. Skip for mechanical / low-risk diffs to save tokens.
+
+P0/P1 findings (from any of the three) route to `/mo-fix`; P2 / NITS are
+the user's call.
 
 ### Commit conventions
 
@@ -155,8 +231,24 @@ import, move the JSX back into the view file before proceeding.
 
 ### PR creation
 
-Ask the user whether to create a PR — do not create one automatically.
-After the PR exists, display `Base: X ← Head: Y` and the URL.
+**Rebase onto base before asking.** Per the memory rule "Rebase onto
+base before every PR", every PR path goes through:
+
+```bash
+cd "<worktree>"
+git fetch origin "${BASE_DEFAULT}"
+git rebase origin/"${BASE_DEFAULT}"          # or stash → reset --hard → pop if uncommitted
+pnpm typecheck && pnpm test <focused> && pnpm lint:arch   # re-run AFTER rebase
+```
+
+If rebase produces conflicts: resolve, re-run the triple gate, do not
+`--no-verify`. If the post-rebase test run reveals shape drift from a
+sibling merge (e.g. an API helper changed shape on `dev`), treat it
+as a new finding and route to `/mo-fix` — do not paper over.
+
+Then ask the user whether to create a PR — do not create one
+automatically. After the PR exists, display `Base: X ← Head: Y` and the
+URL.
 
 ### Escalation voice — Decision Voice
 
@@ -166,10 +258,13 @@ judgment call, subagent diff divergence, PR creation confirm, design
 docs flag an unresolved UX choice — follow
 `../../references/decision-voice.md`. Lead with your recommendation, frame
 options as user outcomes (not "change `absolute` to `fixed`"), ≤1
-blocking question with ≤2 options. For codex review findings relayed
-from the `codex exec` review above, apply the pre-digest rule from
-`/mo-fix` Step 5.0. Routine commit-level choices (commit message,
-which file to stage first) are *not* Decision Voice — just proceed.
+blocking question with ≤2 options. For findings relayed from the
+parallel pool review (codex + opencode), pre-digest before escalating:
+apply uncontroversial fixes silently, surface only the subset where
+reviewers diverge or where the user's preference genuinely shifts the
+diff. See `/mo-fix` § review-fix follow-up for the pre-digest pattern.
+Routine commit-level choices (commit message, which file to stage
+first) are *not* Decision Voice — just proceed.
 
 ## What's next
 

@@ -6,6 +6,8 @@ argument-hint: "[symptom, stack trace, reproduction steps, or 'don't know yet']"
 
 # Mo Debug
 
+> **Pipeline anchor**: `mo-debug` runs **before** ship-workflow Phase 1. Findings feed into `/mo-plan` (Phase 1) or `/mo-fix` Bug Fix mode (full pipeline). Don't fix from here directly — once root cause is identified, hand off.
+
 > **Upstream of `/mo-fix`.** Use when you don't yet know what broke, let
 > alone what failing test to write. `/mo-fix` *starts* by turning a known
 > bug into a red-light test. `/mo-debug` *ends* by knowing what that
@@ -233,18 +235,30 @@ Root cause known → route to the right follow-up skill:
 | Fix would match one of `/mo-fix`'s 2a systemic triggers (design system, API contract, provenance field, 3+ sites) | `/mo-plan` | Needs full Quality Gate, not a bug flow |
 | Decision drift — the "bug" is a violation of an active `DECISIONS.md` entry | `/mo-fix` with the decision cited in the commit message | Signal that the code moved toward the decision, not away from it |
 | Investigation inconclusive after two hypothesis rounds | Surface status to user, do NOT guess | Capture what's known, what's been ruled out, and what probe would cut the remaining space |
-| Second opinion needed | `codex exec` (in the worktree) | Hand off the hypothesis table and current evidence, ask Codex to poke holes — see snippet below |
+| Second opinion needed | shared codex pool (in the worktree) | Hand off the hypothesis table and current evidence to a pool pane, ask it to poke holes — see snippet below |
 
 Pass the hypothesis table + evidence log forward in the handoff so
 `/mo-fix` or `/mo-plan` doesn't repeat the investigation.
 
-For the second-opinion case, **`cd` into the repo first** — `codex
-exec` reads the current working directory; do not rely on `-C` /
-`--cd` flags:
+For the second-opinion case, use the **shared tmux pool** — see
+[`/mo-plan` § Pool protocol](../mo-plan/SKILL.md#pool-protocol-canonical--referenced-by-other-mo--skills)
+for the canonical `pool-task.sh acquire-for / send / wait / done`
+sequence. This is a free-form prompt (hypothesis poking, not diff
+review):
 
 ```bash
-cd "<repo-or-worktree>"
-codex exec "$(cat <<'PROMPT'
+WORKTREE="<absolute-repo-or-worktree-path>"
+
+# Pool protocol — see /mo-plan § Pool protocol.
+TASK="MAX-NNN-debug-2nd-opinion"
+T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available"; exit 1; }
+
+OUT=$(mktemp -t mo-debug-secondopinion-XXXXXX.md)
+PROMPT_FILE=$(mktemp -t mo-debug-prompt-XXXXXX.txt)
+cat > "$PROMPT_FILE" <<PROMPT_EOF
+Working directory for any tool calls: $WORKTREE
+Use your shell tool with that absolute cwd; do not assume relative paths.
+
 Second opinion on a root-cause investigation. Below are competing
 hypotheses, supporting evidence, and falsified candidates. Poke holes:
 
@@ -255,11 +269,19 @@ hypotheses, supporting evidence, and falsified candidates. Poke holes:
 - Is the convergence guard satisfied, or could two surviving claims
   co-exist as a union root cause?
 
-Investigation packet:
-PROMPT
-)
+When done, write your COMPLETE response to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
 
-<paste hypothesis table and evidence log>"
+Investigation packet:
+$(cat "$EVIDENCE_FILE")
+PROMPT_EOF
+
+pool-task.sh send "$T" "$PROMPT_FILE"; rm "$PROMPT_FILE"
+pool-task.sh wait "$T" --timeout 900
+[[ -s "$OUT" ]] || tmux capture-pane -t "$T" -p -S -300 > "$OUT"
+SECOND_OPINION=$(cat "$OUT")
+pool-task.sh done "$T"
 ```
 
 ---

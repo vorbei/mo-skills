@@ -11,6 +11,19 @@ for a fresh Claude session. The fresh session should be able to pick up
 exactly where this one left off without needing any context from this
 conversation.
 
+## Pipeline mode (when ship-workflow.md exists)
+
+If the project has `docs/ship-workflow.md`, the resume prompt MUST include:
+
+1. **Current ship-workflow phase** — which of {pre-flight, plan, implement, review, verify, ship} is active, and what's blocking advancement
+2. **Pool task assignments** — which task owns which pool pane via `pool-task.sh list`, plus the dashboard's current state vocabulary (busy / wait / done / idle). Reference panes by task name, not raw `pool:0.<idx>` (indices shift across cold rebuilds).
+3. **Plan + branch + PR status** — canonical plan path, branch name, PR URL/state if exists
+4. **Pre-flight re-check checklist** — fresh session must re-run Phase 0 (env / SSO / cwd / planning-guidelines / dev SHA freshness) since these decay across sessions
+
+Add at top of generated resume prompt: `Read docs/ship-workflow.md before continuing — this is a multi-phase ship in progress.`
+
+Skip pipeline-aware handoff only if the work isn't a MAX-NNN ship (e.g., research session, doc edit, infra config).
+
 ## Config
 
 ```bash

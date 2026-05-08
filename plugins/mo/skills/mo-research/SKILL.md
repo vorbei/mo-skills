@@ -6,6 +6,8 @@ argument-hint: "[topic or question — free-form, or an issue reference]"
 
 # Mo Research
 
+> **Pipeline anchor**: runs **before** ship-workflow Phase 1 (Plan). If `docs/ship-workflow.md` exists, finish research first, then `/mo-plan` triggers parallel codex+opencode plan generation with the research as input.
+
 Upstream of `/mo-plan`. Use when a planning input is ambiguous enough
 that jumping straight into plan writing would thrash — scope unclear,
 multiple plausible approaches, unfamiliar library, or a proposed
@@ -240,7 +242,7 @@ Wait for the user's choice. Don't auto-pivot into any of them.
 | Research resolved the ambiguity, single-file fix | `/mo-fix` |
 | Still exploratory, want lightweight plan dialog | `EnterPlanMode` |
 | Research revealed a settled decision answers this | Point the user at the relevant `DECISIONS.md` entry, stop |
-| Cross-model sanity check on a contested finding | `codex exec` from inside the relevant repo dir (opt-in) |
+| Cross-model sanity check on a contested finding | shared codex pool — see [`/mo-plan` § Pool protocol](../mo-plan/SKILL.md#pool-protocol-canonical--referenced-by-other-mo--skills); `pool-task.sh acquire-for --wait <task> codex` then `send` a prompt embedding the absolute repo path + contested finding + evidence (opt-in) |
 
 ## Rules
 

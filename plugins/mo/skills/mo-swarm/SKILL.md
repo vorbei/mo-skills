@@ -6,6 +6,8 @@ argument-hint: "[issue keys, comma-separated] | [Linear cycle URL] | ['all my op
 
 # Mo Swarm
 
+> **Pipeline anchor**: runs **N parallel ship-workflow.md instances** when ≥3 independent issues are batched. Each issue follows the 5-phase pipeline (plan → implement → review → verify → ship) but parallelized across N workers. Per-issue agent assignment per ship-workflow.md § Phase assignment table; swarm-level orchestration adds the kanban + state.json layer on top.
+
 > **Project overlay on the [batch orchestration protocol](../../../../../../Maxgent/maxgent-worktree/webapp/harness/multi-agent.md#96-batch-issue-ingestion-n-issues--n-prs).**
 > The dispatch prompts live in
 > [`harness/batch-orchestration-templates.md`](../../../../../../Maxgent/maxgent-worktree/webapp/harness/batch-orchestration-templates.md).
@@ -251,12 +253,49 @@ When all approved workers report triple-gate green and idle:
 "$SCRIPTS/state.sh" advance "$RUN_DIR" "$KEY" --to review
 ```
 
-Then dispatch **both reviewers in parallel** for every PR:
+Then dispatch **both reviewers in parallel** for every PR. The
+opencode side now runs through the **shared tmux pool** (see
+[`/mo-plan` § Pool protocol](../../mo-plan/SKILL.md#pool-protocol-canonical--referenced-by-other-mo--skills))
+instead of spawning a fresh `opencode run` per worktree — one less
+process, the pool is shared across the whole swarm:
 
 ```bash
-# Background: opencode (one per worktree)
-opencode run --dir "$DIR" --dangerously-skip-permissions "$REVIEW_PROMPT" \
-  > /tmp/swarm-reviews/${KEY}-opencode.md 2>&1 &
+# Background: opencode pool pane, one per PR. Use task-scoped acquire so
+# each KEY gets its own pane and the dispatcher serializes when the kind
+# is saturated (--wait blocks instead of failing). See /mo-plan §Pool protocol.
+TASK="swarm-${KEY}-opc"
+T=$(pool-task.sh acquire-for --wait $TASK opencode) || { echo "no opencode available — surface to user"; continue; }
+
+# OUT file contract — swarm reads /tmp/swarm-reviews/${KEY}-opencode.md
+# programmatically; pane scraping is unreliable across the parallel batch.
+OUT="/tmp/swarm-reviews/${KEY}-opencode.md"
+mkdir -p "$(dirname "$OUT")"
+PROMPT_FILE=$(mktemp -t swarm-prompt-${KEY}-XXXXXX.txt)
+cat > "$PROMPT_FILE" <<PROMPT_EOF
+Working directory: $DIR
+Use your shell tool with that absolute cwd. Run
+  git diff origin/${BASE}...HEAD
+and review the change end to end.
+
+Output format:
+- Numbered findings. For each: file:line → concern → suggestion.
+- Tag each [P0]/[P1]/[P2].
+- Final line, exactly: VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+
+When done, write your COMPLETE output (findings + VERDICT) to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
+PROMPT_EOF
+
+pool-task.sh send "$T" "$PROMPT_FILE"; rm "$PROMPT_FILE"
+
+# Record both the pool pane (for dashboard deep-link) and the OUT file
+# (for the verdict poller) in state. The verdict poller calls
+# `pool-task.sh wait "$T" --timeout 900` followed by `pool-task.sh done "$T"`
+# once the OUT file is consumed.
+"$SCRIPTS/state.sh" set "$RUN_DIR" "$KEY" reviewer.opencode.pane "$T"
+"$SCRIPTS/state.sh" set "$RUN_DIR" "$KEY" reviewer.opencode.out  "$OUT"
+"$SCRIPTS/state.sh" set "$RUN_DIR" "$KEY" reviewer.opencode.task "$TASK"
 
 # Foreground: Claude correctness (Agent tool, send all in single message
 # with multiple tool_use blocks for true parallelism)
@@ -266,13 +305,27 @@ Agent({
 })
 ```
 
+Poll each `${KEY}`'s acquired pane (`tmux capture-pane -t $S -p`) for
+the verdict line, write it to `/tmp/swarm-reviews/${KEY}-opencode.md`,
+then leave the pane idle for the next acquire. Do not kill pool
+sessions.
+
 Reason for dual: opencode catches diff-mechanical issues, Claude catches
 plan-vs-implementation gaps + locale-quality + cross-cutting memory rules.
 Single-pipeline missed real CRITICAL findings on 3 of 7 PRs in the
 2026-04-29 batch.
 
+If the opencode pool is fully busy mid-swarm, queue the remaining
+issues' opencode review (they wait — do **not** fall back to a one-shot
+`opencode run` invocation; that defeats the shared-pool convention and
+double-bills the OpenAI/Anthropic quota). The Claude correctness side
+is unaffected; it runs via the Agent tool, not the tmux pool.
+
 Send the [`review` template](../../../../../../Maxgent/maxgent-worktree/webapp/harness/batch-orchestration-templates.md#5-review)
 verbatim to both — the prompt itself enumerates every dimension to check.
+For the opencode pool case the template body goes to the pane as a
+free-form prompt only when `/review` is insufficient (e.g. plan-anchored
+review with reference docs); otherwise rely on `/review` alone.
 
 ## Phase 7 — Merge findings, dispatch fix-review
 
@@ -309,14 +362,17 @@ esac
 
 ## Phase 8 — Branch handoff to PR (orchestrator runs git, not the worker)
 
-Per [`batch-orchestration-templates.md` "Branch handoff to PR"](../../../../../../Maxgent/maxgent-worktree/webapp/harness/batch-orchestration-templates.md#branch-handoff-to-pr-orchestrator-runs-this-not-the-worker):
+Per [`batch-orchestration-templates.md` "Branch handoff to PR"](../../../../../../Maxgent/maxgent-worktree/webapp/harness/batch-orchestration-templates.md#branch-handoff-to-pr-orchestrator-runs-this-not-the-worker)
+**and** the memory rule "Rebase onto base before every PR" — every PR
+in the swarm is rebased onto its base before push, with the triple gate
+re-run **after** the rebase to catch sibling-merged shape drift:
 
 ```bash
 cd "$DIR"
 git stash push -u -m "wip ${KEY}"
 git fetch origin "$BASE"
 git reset --hard "origin/$BASE"   # base may have moved during the swarm
-git stash pop                      # auto-merge if no conflicts
+git stash pop                      # auto-merge if no conflicts (rebase-equivalent)
 cd client/webapp && pnpm install --frozen-lockfile
 pnpm typecheck && pnpm test <focused>  # CATCH stale code shapes from sibling merges
 git add <explicit files>           # never `git add -A`
@@ -324,6 +380,11 @@ git commit -m "..."
 git push -u origin "$BRANCH"
 gh pr create --base "$BASE" --title "..." --body "..."
 ```
+
+If the post-rebase tests reveal sibling shape drift (e.g. an API helper
+changed signature on `dev`/release while the worker was running), feed
+the failure back as a new finding into Phase 6 review, do not
+hand-patch and push.
 
 **Pre-commit hook gotcha** (memory rule): if a hook auto-modifies a file
 and the auto-fix conflicts with staged changes, it silently rolls back

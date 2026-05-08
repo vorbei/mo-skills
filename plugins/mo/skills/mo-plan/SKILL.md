@@ -6,12 +6,36 @@ argument-hint: "[feature description or requirements doc path]"
 
 # Mo Plan
 
+## Default flow — parallel codex + opencode plan dispatch
+
+`/mo-plan` orchestrates two pool agents writing plans in parallel, then
+synthesizes them. You do NOT write the plan yourself unless the pool is
+unavailable (fallback below).
+
+1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
+2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently:
+   ```bash
+   Tc=$(pool-task.sh acquire-for --wait MAX-NNN-plan-cdx codex)
+   To=$(pool-task.sh acquire-for --wait MAX-NNN-plan-opc opencode)
+   OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
+   OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
+   ```
+   Each prompt instructs the agent to write its complete plan body to its
+   own `OUT` file (per-agent mktemp, no shared filename). Same source
+   prompt: "请按 `docs/plans/_planning-guidelines.md` 写 plan: {LINEAR_URL} 描述: {REPRO}".
+3. **Wait + synthesize** — `pool-task.sh wait "$Tc" &` / `pool-task.sh wait "$To" &` in parallel; read `$OUT_C` and `$OUT_O`; produce one canonical `{date}-{NNN}-{type}-MAX-NNN-{slug}-plan.md` taking codex's structure (Open Questions / Risks / Architecture direction) + opencode's specificity (Edge Case coverage / AS values).
+4. **Walk Edge Case Checklist** explicitly — each row in `_planning-guidelines.md` § Edge Case Checklist must be addressed (✅ or N/A with reason).
+5. **Codex plan review** (see § Codex plan review below) — independent review pass on the synthesized plan, gates `/mo-work` start.
+
+Skip the parallel dispatch and write a single plan personally if:
+- One-line typo fix (no plan needed at all — go straight to commit)
+- Brainstorm/research (use `docs/brainstorms/` not `docs/plans/`)
+- Pool unavailable (no warm pool, both kinds saturated past `--wait` timeout) — fall back to single-author `ce:plan` flow inline
+
 > **Reference, not replacement.** This skill is a *project overlay* on `ce:plan`.
 > Each section either (a) adds a project-specific constraint ce:plan does not
 > have, (b) overrides a ce:plan default with a one-line justification, or
 > (c) keeps a concept locally because ce:plan does not own it.
-
-Follow the **`ce:plan` workflow exactly**, then apply the project overlays below.
 
 ## Config
 
@@ -55,8 +79,8 @@ user / desired outcome / flow shape still unresolved) rather than
 **how to build** a known thing, stop before the ce:plan workflow and
 recommend `/ce-brainstorm` first — planning a shape that hasn't been
 decided is exactly what produces the "too technical" escalation loop
-later. `ce:plan` Phase 0.4 will also route here downstream, but
-catching it upstream saves the research pass. Signals:
+later. ce:plan also routes here downstream, but catching it upstream
+saves the research pass. Signals:
 
 - Input is a question about direction ("should we do X or Y?",
   "what's the right shape for …")
@@ -112,8 +136,8 @@ Every plan must end with these two units in order:
 
 1. **`/simplify`** — run `<commands.test> && <commands.archLint>` before and
    after; both must be green. See `tdd-and-simplify.md` §4.
-2. **Codex plan review** — read-only plan review via `codex exec` (see
-   "Codex plan review" section below).
+2. **Plan review** — parallel codex+opencode read-only plan review via
+   the pool (see "Codex plan review" section below).
 
 ### Worktree creation (standard / deep plans)
 
@@ -178,54 +202,239 @@ table to the plan file and mirror it in the conversation:
 
 N/A entries must carry a reason. On any ❌, fix the plan before delivering.
 
-### Codex plan review
+### Pool protocol (canonical — referenced by other mo-* skills)
 
-After the QG table is written, hand the plan to Codex via `codex exec`.
-**`cd` into the plan's worktree first** (or any repo dir if the plan has
-no worktree yet) — `codex exec` always uses the current working
-directory; do not rely on `-C` or `--cd` flags.
+A shared **single tmux session named `pool`** with **6 long-running TUI
+panes** in a 3×2 tiled layout, defaulting to a **2 × 2 × 2 mix** of
+three TUIs. Each pane runs one TUI; pane index ↔ tool kind is **not**
+guaranteed by index alone (`tmux split-window` order varies), so always
+discover via `pane_current_command` at runtime.
+
+| Typical pane | TUI | `pane_current_command` match |
+|---|---|---|
+| 0, 1 | OpenAI codex | `codex*` (e.g. `codex-aarch64-a`) |
+| 2, 3 | opencode (sst) | `opencode` |
+| 4, 5 | Claude Code | `2.1.123` (claude binary version) or `claude` |
+
+The session + Ghostty window are launched by `~/.local/bin/pool-launch.sh`
+(fullscreen on portrait display, panes grouped by tool in rows).
+**Reuse panes — never `tmux kill-session -t pool` or kill individual
+panes** unless the user explicitly asks to rebuild the pool.
+
+**Targets:** all `tmux send-keys` / `tmux capture-pane` use
+`pool:0.<index>` form. Indices are tree-walk order, not row-major —
+discover via `pool-task.sh state` or the dashboard, never hardcode.
+
+The pool now runs a queue + dashboard layer. All mo-* skills go through
+`pool-task.sh` (`~/.local/bin/pool-task.sh`); raw `tmux list-panes`
+acquire loops and `pool_reset` keystroke chords are deprecated.
+
+Other mo-* skills (`/mo-work`, `/mo-fix`, `/mo-debug`, `/mo-research`,
+`/mo-swarm`) link back to this section instead of re-defining it.
+
+**1. Acquire a task-bound pane** — block until one is available.
 
 ```bash
-cd "<worktree-path-or-repo-dir>"
-codex exec "$(cat <<'PROMPT'
+TASK="MAX-NNN"        # or any stable string identifying this work unit
+T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available"; exit 1; }
+# T = "pool:0.<idx>"; the dispatcher prefers truly-fresh panes over
+# "done" (previously-used) panes, and reuses the same pane on repeat
+# calls for the same TASK so phase-to-phase context is preserved.
+```
+
+`acquire-for --wait` defaults to a 600-second timeout. Pass `--wait 60`
+to fail-fast, or `--wait 1800` for slow days. Without `--wait` the call
+returns immediately or fails with `no idle <kind> pane`. If you need a
+hard wipe of a previously-used pane (rare — fresh-vs-done preference
+handles most cases), run `pool-launch.sh respawn codex|opencode` once
+and re-acquire.
+
+**2. Send the payload — instruct the TUI to write output to a file,
+not to rely on pane scraping.** Two non-negotiable parts:
+
+- **`tmux send-keys "cd <path>"` does NOT change TUI process cwd** —
+  the TUI eats it as chat. Embed absolute path in the prompt; let the
+  model's shell tool cd.
+- **`tmux capture-pane` is unreliable for verdicts** — long outputs
+  wrap, scroll out of buffer, mix with spinner glyphs and ANSI styling.
+  Pre-allocate an `OUT` file, instruct the TUI to write its complete
+  output there, then read the file.
+
+```bash
+WORKTREE="<absolute-worktree-path>"
+OUT=$(mktemp -t mo-review-${KIND}-XXXXXX.md)
+cat > /tmp/mo-prompt-$$.txt <<PROMPT_EOF
+Working directory: $WORKTREE
+Use your shell tool with that absolute cwd. Run
+  git diff origin/${BASE}...HEAD
+and do a pre-PR code review.
+
+Output format:
+- Numbered findings. For each: file:line → concern → suggestion.
+- Tag each [P0] (blocks landing) / [P1] (should fix before merge) / [P2] (nice-to-have).
+- Final line, exactly: VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+
+When done, write your COMPLETE output (findings + VERDICT line) to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
+PROMPT_EOF
+
+pool-task.sh send "$T" /tmp/mo-prompt-$$.txt
+rm /tmp/mo-prompt-$$.txt
+```
+
+`pool-task.sh send` handles paste-buffer submission. Don't roll your own
+send sequence.
+
+**3. Wait for completion** — block until the agent stops spinning, then
+read the OUT file.
+
+```bash
+pool-task.sh wait "$T" --timeout 600 || echo "timeout — surface pane to user"
+[[ -s "$OUT" ]] || {
+  # TUI ignored the file-write instruction — fall back to scrape.
+  echo "warning: $OUT empty after wait, scraping pane"
+  tmux capture-pane -t "$T" -p -S -300 > "$OUT"
+}
+REVIEW=$(cat "$OUT")
+```
+
+`pool-task.sh wait` polls every 2s for the codex spinner glyph in the
+pane title (most reliable) plus opencode tail patterns; it returns when
+the pane has been quiescent for two consecutive polls. Default timeout
+1800s; pass `--timeout 60` for snappier failure on quick prompts.
+
+**4. Release** — call `pool-task.sh done "$T"` once you're finished
+with the task. This clears the registry mapping so the dispatcher can
+hand the pane to the next caller (the dashboard flips it from yellow
+`wait` to cyan `done`). If you intend to follow up with another phase
+under the same TASK name, **don't** call done — just `acquire-for` the
+same TASK again and you'll get the same pane back with conversation
+context intact.
+
+```bash
+pool-task.sh done "$T"
+```
+
+**Anti-patterns** (collected from real dry-runs — keep updated as new
+modes break)
+
+- **Hand-rolling acquire / reset / send sequences** — the queue layer
+  (`pool-task.sh`) is now the single entry point. Raw `tmux list-panes`
+  acquire loops, manual `/new` resets, and `send-keys ... Enter ×2`
+  rituals are deprecated; use `acquire-for --wait`, `send`, `wait`,
+  `done` instead. They handle the bracket-paste edit-mode quirk, fresh-vs-done
+  pane preference, and task affinity uniformly.
+- **`/review` to opencode** — codex-only as of opencode v1.14.30. On
+  claude it routes to a user-installed skill. On opencode use free-form.
+- **`tmux send-keys "cd <path>"`** — TUI eats it as chat, doesn't
+  change process cwd. Embed absolute path in the prompt; let the
+  model's shell tool cd.
+- **Killing a pool pane** — pool is shared, kills break dispatch.
+  Use `pool-launch.sh respawn codex|opencode` to refresh one tier.
+- **Falling back to `codex exec` on busy** — both pool and one-shot
+  compete for OpenAI quota. Pick one (pool, with `--wait`) and surface "busy".
+- **Hex colors `#F…` in tmux pane-border-format** — `#F` is the
+  `window_flags` directive (expands to `*`). Hex colors must use
+  `##FF…` (escaped `##` = literal `#`). Same for `#H/#W/#T/#S/#I/#P/#D`
+  prefixes.
+- **Setting pane-border-* at `-wg` global** — they're window-level.
+  Existing window-specific values override globals. Use
+  `-w -t pool:0` to actually apply on the live pool window.
+- **Re-attaching pool from a fresh tmux client** — tmux stays at
+  initial 80×24 unless you `tmux refresh-client && tmux resize-window
+  -t pool:0 -A` so the panes re-fit Ghostty's actual cell grid.
+- **opencode TUI without `permission: "allow"` in opencode.json** —
+  shell-tool writes block on interactive `Allow once / always / Reject`
+  dialog, breaking the OUT-file contract. The `--dangerously-skip-permissions`
+  flag is `opencode run`-only; passing it to TUI mode makes the binary
+  exit immediately (pool-launch will silently lose those panes). The
+  fix is config-side: `~/.config/opencode/opencode.json` →
+  `"permission": "allow"` (or per-tool object). pool-launch.sh assumes
+  this is set.
+
+### Codex plan review
+
+After the QG table is written, hand the synthesized plan to **two reviewer
+panes in parallel** — codex and opencode (deepseek). Mirror the dispatch
+flow used in /mo-work review: same prompt body, distinct OUT files, merge
+findings. Single-reviewer plan review misses too much; the policy is two
+independent passes minimum. `/review` is for diffs, not for plan documents.
+
+```bash
+WORKTREE="<absolute-worktree-path>"
+PLAN_FILE="<absolute-path-to-plan.md>"
+
+Tc=$(pool-task.sh acquire-for --wait MAX-NNN-planrev-cdx codex)
+To=$(pool-task.sh acquire-for --wait MAX-NNN-planrev-opc opencode)
+OUT_C=$(mktemp -t mo-plan-review-codex-XXXXXX.md)
+OUT_O=$(mktemp -t mo-plan-review-opencode-XXXXXX.md)
+
+make_prompt() {
+  local OUT="$1"
+  cat <<PROMPT_EOF
+Working directory: $WORKTREE
+Use your shell tool with that absolute cwd; do not assume relative paths.
+
 You are reviewing an implementation plan. Anchor judgment to the plan's
 Acceptance Scenarios / Requirements Trace / Success Criteria — focus on
 whether the approach is right, not on unit sizing or test names.
 
 Output format:
 - Numbered findings. For each: location in plan → concern → suggestion.
-- Tag each finding [P0] (blocks landing), [P1] (should fix before /mo-work),
-  or [P2] (nice-to-have).
+- Tag each [P0] (blocks landing) / [P1] (should fix before /mo-work) / [P2] (nice-to-have).
 - Final line, exactly one of:
   VERDICT: APPROACH SOUND | APPROACH NEEDS ADJUSTMENT | RETHINK APPROACH
 
-Plan file:
-PROMPT
-)
+When done, write your COMPLETE output (findings + VERDICT) to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
 
-$(cat <plan-file>)"
+Plan file:
+$(cat "$PLAN_FILE")
+PROMPT_EOF
+}
+P_C=$(mktemp -t prompt-cdx-XXXXXX.txt); make_prompt "$OUT_C" > "$P_C"
+P_O=$(mktemp -t prompt-opc-XXXXXX.txt); make_prompt "$OUT_O" > "$P_O"
+pool-task.sh send "$Tc" "$P_C" && rm "$P_C"
+pool-task.sh send "$To" "$P_O" && rm "$P_O"
+
+pool-task.sh wait "$Tc" --timeout 600 &
+pool-task.sh wait "$To" --timeout 600 &
+wait
+[[ -s "$OUT_C" ]] || tmux capture-pane -t "$Tc" -p -S -300 > "$OUT_C"
+[[ -s "$OUT_O" ]] || tmux capture-pane -t "$To" -p -S -300 > "$OUT_O"
+pool-task.sh done "$Tc"
+pool-task.sh done "$To"
+
+REVIEW_CODEX=$(cat "$OUT_C")
+REVIEW_OPENCODE=$(cat "$OUT_O")
 ```
 
-Tag each returned finding ✅ agree / ⚠️ partially agree / ❌ disagree
-(with reason), let the user decide, then patch the plan and regenerate
-the QG table. `APPROACH NEEDS ADJUSTMENT` or `RETHINK APPROACH` must be
-resolved before delivery.
+Read both verdicts from the OUT files (not from the panes). Merge: both
+flag = high-confidence change; one flag + valid = judge by P-tag; verdicts
+disagree = adjudicate against `_planning-guidelines.md` and project
+conventions. Tag each returned finding ✅ agree / ⚠️ partially agree /
+❌ disagree (with reason), let the user decide, then patch the plan and
+regenerate the QG table. `APPROACH NEEDS ADJUSTMENT` or `RETHINK APPROACH`
+from either reviewer must be resolved before delivery.
 
 ### Output voice — Decision Voice
 
 See `../../references/decision-voice.md`. Every user-facing question raised
-during planning (approach fork, scope confirm, Codex review verdict
+during planning (approach fork, scope confirm, plan review verdict
 handoff, worktree-conflict confirm) follows the five rules: lead with
 your recommendation, frame options as user outcomes (not mechanisms),
-≤1 blocking question with ≤2 options, pre-digest Codex findings before
-escalating, stakes-scaled brevity.
+≤1 blocking question with ≤2 options, pre-digest reviewer findings
+before escalating, stakes-scaled brevity.
 
-Specifically for the Codex review handoff above: do not paste the
-`APPROACH NEEDS ADJUSTMENT: 1/2/3` list verbatim. For each finding,
-decide what you'd do if the user delegated to you — apply the
-uncontroversial ones silently, then escalate only the subset where the
-user's preference genuinely changes the plan, each framed as a
-user/product outcome.
+Specifically for the parallel plan review handoff above: do not paste
+either reviewer's `APPROACH NEEDS ADJUSTMENT: 1/2/3` list verbatim,
+and do not surface every disagreement between codex and opencode. For
+each finding, decide what you'd do if the user delegated to you — apply
+uncontroversial ones silently, escalate only the subset where (a) both
+reviewers agree, or (b) reviewers diverge AND the choice meaningfully
+changes the plan. Each escalation framed as a user/product outcome.
 
 The Quality Gate Evidence and Provenance Granularity Check tables are
 *structured data*, not decisions — write them verbatim regardless of

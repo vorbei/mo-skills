@@ -6,6 +6,27 @@ argument-hint: "[bug description, error message, issue number, or PR number for 
 
 # Mo Fix
 
+## Pipeline mode (preferred when ship-workflow.md exists)
+
+If the project has `docs/ship-workflow.md`, `/mo-fix` modes map to ship-workflow phases:
+
+### Bug Fix mode (new MAX-NNN bug)
+
+Run the **full 5-phase ship pipeline** (don't shortcut). Start at Phase 0 pre-flight.
+
+### Review Fix mode (PR feedback)
+
+This is **Phase 3** of ship-workflow. The diff is already implemented; reviewers' findings are in scope.
+
+1. **Dispatch parallel review** — `To=$(pool-task.sh acquire-for --wait MAX-NNN-rev-opc opencode)` and run a `ce-code-review` Claude subagent in parallel. Both get the brief at `/tmp/review-MAX-NNN.md` referencing the plan and base SHA. opencode writes verdict to `/tmp/review-opencode-MAX-NNN.md` via the OUT-contract; the ce-code-review agent returns its findings inline. Never hardcode pane indices — the dispatcher picks idle panes for you and indices shift across pool rebuilds.
+2. **Merge findings** — Both flag = definitely fix (high confidence). One flag + valid = fix if P0, defer if P2, judge if P1. Conflicting = adjudicate based on plan + project conventions.
+3. **Apply** — re-acquire the implementing codex pane via its task name (`Tc=$(pool-task.sh acquire-for --wait MAX-NNN codex)` returns the same pane if MAX-NNN is still registered), instruct it to fix P0/P1, then commit "fix(scope): address P0/P1 review feedback".
+4. **Triple gate** — `pnpm typecheck && pnpm test && pnpm lint:arch` GREEN before continuing to Phase 4.
+
+P2 default = deferred (note in PR body, don't fix this round). Only fix P2 if user explicitly asks.
+
+## Legacy standalone mode (when no ship-workflow.md)
+
 > **Reference, not replacement.** This skill is a *project overlay* on the
 > `ce:work` execution approach for fix-shaped work. Each section either
 > (a) adds a project-specific constraint ce:work does not have, (b) overrides
@@ -170,33 +191,54 @@ test suite (project convention).
 Commit as `fix(<scope>): description`. Valid scopes come from
 `mo-config.json → commitScopes`.
 
-**Reviewer:** Codex via `codex exec`. **`cd` into the worktree first**
-— `codex exec` reads the current working directory; do not rely on
-`-C` / `--cd` flags. Fetch the base ref before invoking so the diff is
-current.
+**Reviewer:** a codex pane from the **shared tmux pool** — see
+[`/mo-plan` § Pool protocol](../mo-plan/SKILL.md#pool-protocol-canonical--referenced-by-other-mo--skills)
+for the canonical acquire / `/new` / send / poll loop. Fetch the base
+ref before sending so the diff inside the TUI is current.
 
 ```bash
-cd "<worktree-path>"
-git fetch origin "${BASE_DEFAULT}"
-codex exec "$(cat <<'PROMPT'
-You are reviewing a bug fix before PR. Run `git diff origin/<BASE>...HEAD`
-and review the change end to end. If a plan file is referenced in the
-fix, anchor judgment to its Acceptance Scenarios / Success Criteria.
+WORKTREE="<absolute-worktree-path>"
+cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
+
+# Pool protocol — see /mo-plan § Pool protocol.
+TASK="MAX-NNN-fix-review"
+T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available"; exit 1; }
+
+# Free-form prompt with OUT file contract — review-fix loop iterates
+# on the findings programmatically, so we need parseable output.
+OUT=$(mktemp -t mo-fix-review-XXXXXX.md)
+PROMPT_FILE=$(mktemp -t mo-fix-prompt-XXXXXX.txt)
+PLAN_REF="${PLAN_FILE:-}"      # optional plan file path; embed if set
+cat > "$PROMPT_FILE" <<PROMPT_EOF
+Working directory: $WORKTREE
+Use your shell tool with that absolute cwd. Run
+  git diff origin/${BASE_DEFAULT}...HEAD
+and review the bug fix end to end.${PLAN_REF:+ A plan exists at $PLAN_REF — read it and anchor judgment to its Acceptance Scenarios / Success Criteria.}
 
 Output format:
 - Numbered findings. For each: file:line → concern → suggestion.
-- Tag each finding [P0] (blocks landing), [P1] (should fix before merge),
-  or [P2] (nice-to-have).
-- Final line, exactly one of:
-  VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
-PROMPT
-)"
+- Tag each [P0]/[P1]/[P2].
+- Final line, exactly: VERDICT: BLOCK | CHANGES REQUESTED | NITS | LGTM
+
+When done, write your COMPLETE output (findings + VERDICT) to:
+  $OUT
+Then reply with EXACTLY one line: DONE $OUT
+PROMPT_EOF
+
+pool-task.sh send "$T" "$PROMPT_FILE"; rm "$PROMPT_FILE"
+pool-task.sh wait "$T" --timeout 600
+[[ -s "$OUT" ]] || tmux capture-pane -t "$T" -p -S -300 > "$OUT"
+REVIEW=$(cat "$OUT")
+# Don't call `done` yet — round-2+ wants the same pane with context.
 ```
 
-Replace `<BASE>` in the prompt with `${BASE_DEFAULT}`. On round-2+
-review, append a paragraph in the prompt naming the round-1 findings so
-Codex can tag repeats vs new issues — `codex exec` is one-shot, so
-round-to-round context is the caller's job.
+**Round-2+ review reuses the same pane** because `acquire-for` is
+task-scoped: re-acquire with the same `$TASK` name and you get the
+same `pool:0.<idx>` back, codex's conversation memory intact. Append a
+follow-up prompt referencing "round-1 was above; round-2 fixes are in
+the new commits — re-run the review and tag repeats vs new"; no manual
+context-clear needed. Call `pool-task.sh done "$T"` only when the entire
+review-fix loop closes.
 
 Follow-up protocol:
 
@@ -217,17 +259,32 @@ Follow-up protocol:
    `fix(<scope>): address review — <one-line summary>`. One commit per
    logical finding cluster; do not amend the primary fix commit so
    the review trail stays legible in `git log`.
-3. After each follow-up commit or batch, **re-run the codex exec
-   review** once. The loop exits when the review returns zero blocking
-   items, or the user explicitly waives a specific finding (record the
-   waiver rationale in the conversation).
+3. After each follow-up commit or batch, **re-run the review in the
+   same pool pane** (no `/new` between rounds — see the round-2+ note
+   above). The loop exits when the review returns zero blocking items,
+   or the user explicitly waives a specific finding (record the waiver
+   rationale in the conversation).
 4. If a finding triggers a 2a mechanical trigger (e.g. "the real fix
    is in the design-system file we imported from"), stop the review
    loop and escalate to `/mo-plan` — do not silently grow the bug-fix
    PR into a refactor.
 
+**Rebase onto base before asking for PR.** Per the memory rule
+"Rebase onto base before every PR":
+
+```bash
+cd "<worktree>"
+git fetch origin "${BASE_DEFAULT}"
+git rebase origin/"${BASE_DEFAULT}"          # or stash → reset --hard → pop if uncommitted
+pnpm typecheck && pnpm test <focused> && pnpm lint:arch   # re-run AFTER rebase
+```
+
+If post-rebase tests reveal sibling-merge shape drift, treat as a new
+finding and feed back into Step 5 — don't paper over. Conflicts:
+resolve, never `--no-verify`.
+
 Ask the user whether to create a PR only after the loop has exited
-cleanly. Never create one automatically.
+cleanly **and** the rebase is clean. Never create one automatically.
 
 ---
 
@@ -276,7 +333,15 @@ return to R1.
 
 ### Step R4 — Verify and push
 
-Run `<TYPECHECK_CMD> && <TEST_CMD> && <ARCH_CMD>`. Run the Step 4a
+**Rebase onto base first** (memory rule "Rebase onto base before every
+PR" applies to PR updates too — sibling merges between rounds matter):
+
+```bash
+git fetch origin "${BASE_DEFAULT}"
+git rebase origin/"${BASE_DEFAULT}"
+```
+
+Then run `<TYPECHECK_CMD> && <TEST_CMD> && <ARCH_CMD>`. Run the Step 4a
 container/view check if configured. Post the round summary:
 
 ```

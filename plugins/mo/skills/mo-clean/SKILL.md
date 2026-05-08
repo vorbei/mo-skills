@@ -6,6 +6,8 @@ argument-hint: "[optional: worktree path if not in a worktree already]"
 
 # Mo Clean
 
+> **Pipeline anchor**: runs **after** ship-workflow Phase 5 (Ship) is fully landed (PR merged + deployed). If `docs/ship-workflow.md` exists, capture lessons-learned into ship-workflow.md § Failure modes if a new pattern emerged this cycle.
+
 Close out a completed worktree: verify it is merged, capture learnings,
 then delete the local worktree and branch.
 
