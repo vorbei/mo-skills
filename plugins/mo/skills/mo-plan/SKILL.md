@@ -13,17 +13,20 @@ synthesizes them. You do NOT write the plan yourself unless the pool is
 unavailable (fallback below).
 
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
-2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. Force a fresh TUI session (`new-session`) and switch each pane into **plan mode** (Shift+Tab) before sending the prompt. Codex flips its model badge to "Plan mode"; opencode swaps its footer from "Build ·" to "Plan ·". The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat.
+2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. **Order is load-bearing**: `new-session` → `plan-mode on` → `send`. Switching plan mode AFTER sending is too late; opencode in particular will auto-explore on whatever input the welcome placeholder provides if you let it wake up in build mode.
    ```bash
    Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
    To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
    pool-task.sh new-session "$Tc"   # /new + Enter ×2 (codex)
    pool-task.sh new-session "$To"   # Ctrl-X N (opencode)
-   pool-task.sh plan-mode "$Tc"     # into plan mode
+   pool-task.sh plan-mode "$Tc"     # MUST happen before send
    pool-task.sh plan-mode "$To"
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
    ```
+   Codex flips its model badge to "Plan mode"; opencode swaps its footer from "Build ·" to "Plan ·". The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat.
+
+   **Escape hatch**: if a pane goes off-script after send (auto-explores random files, answers a different question, "thinks" about something unrelated), the TUI is contaminated. Don't try to recover with another prompt — `pool-launch.sh respawn opencode` (or `respawn codex`) to wipe that entire tier, then re-acquire and re-dispatch.
    Each prompt instructs the agent to write its complete plan body to its
    own `OUT` file (per-agent mktemp, no shared filename). Same source
    prompt: "请按 `docs/plans/_planning-guidelines.md` 写 plan: {LINEAR_URL} 描述: {REPRO}".
