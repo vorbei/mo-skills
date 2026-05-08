@@ -13,17 +13,63 @@ synthesizes them. You do NOT write the plan yourself unless the pool is
 unavailable (fallback below).
 
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
-2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. **Order is load-bearing**: `new-session` → `plan-mode on` → `send`. Switching plan mode AFTER sending is too late; opencode in particular will auto-explore on whatever input the welcome placeholder provides if you let it wake up in build mode.
+2. **Dispatch parallel — two phases per agent.** Plan mode in both codex and opencode is genuinely **read-only** — it blocks the agent's file-write tool, which means the OUT-contract can't be honored while in plan mode. So the dispatch runs in two phases per agent:
+
+   **Phase 1: discuss the plan in plan mode** (no file writes, agent stays in planning posture)
+   **Phase 2: write the plan to OUT in build mode** (mode flipped off, agent's just transcribing what it already worked out)
+
+   Order is load-bearing throughout: `new-session` → `plan-mode on` → `send phase-1` → `wait` → `plan-mode off` → `send phase-2` → `wait` → read OUT. Switching plan mode after sending is too late; opencode in particular will auto-explore on whatever input the welcome placeholder provides if it wakes up in build mode.
+
    ```bash
    Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
    To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
    pool-task.sh new-session "$Tc"   # /new + Enter ×2 (codex)
    pool-task.sh new-session "$To"   # Ctrl-X N (opencode)
-   pool-task.sh plan-mode "$Tc"     # MUST happen before send
+   pool-task.sh plan-mode "$Tc"     # MUST happen before phase-1 send
    pool-task.sh plan-mode "$To"
+
+   # Phase 1: discuss/think (plan mode, no file writes possible).
+   # Same body for both agents; instruct each to end with READY-TO-WRITE so wait sees a settle.
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
+   PHASE1=$(mktemp -t plan-phase1-XXXXXX.txt)
+   cat > "$PHASE1" <<EOF
+   You are in plan mode (read-only). Read $LINEAR_URL and the planning
+   guidelines at docs/plans/_planning-guidelines.md, then sketch the
+   plan in this chat. Cover: Open Questions / Risks / Architecture
+   direction / Edge Case coverage / Acceptance Scenarios / Unit list.
+   Do NOT write any file. End your message with the literal line:
+   READY-TO-WRITE
+   EOF
+   pool-task.sh send "$Tc" "$PHASE1"
+   pool-task.sh send "$To" "$PHASE1"
+   pool-task.sh wait "$Tc" --timeout 600 &
+   pool-task.sh wait "$To" --timeout 600 &
+   wait; rm "$PHASE1"
+
+   # Phase 2: transcribe to OUT (plan mode OFF so file-write works).
+   pool-task.sh plan-mode "$Tc" off
+   pool-task.sh plan-mode "$To" off
+   make_phase2() {
+     local OUT="$1"
+     cat <<EOF
+   Now write the plan you just discussed to:
+     $OUT
+   Use the planning-guidelines structure verbatim. Then reply with
+   exactly one line: DONE $OUT
+   EOF
+   }
+   P_C=$(mktemp -t plan-phase2-cdx-XXXXXX.txt); make_phase2 "$OUT_C" > "$P_C"
+   P_O=$(mktemp -t plan-phase2-opc-XXXXXX.txt); make_phase2 "$OUT_O" > "$P_O"
+   pool-task.sh send "$Tc" "$P_C" && rm "$P_C"
+   pool-task.sh send "$To" "$P_O" && rm "$P_O"
+   pool-task.sh wait "$Tc" --timeout 300 &
+   pool-task.sh wait "$To" --timeout 300 &
+   wait
+   [[ -s "$OUT_C" ]] || tmux capture-pane -t "$Tc" -p -S -300 > "$OUT_C"
+   [[ -s "$OUT_O" ]] || tmux capture-pane -t "$To" -p -S -300 > "$OUT_O"
    ```
+
    Codex flips its model badge to "Plan mode"; opencode swaps its footer from "Build ·" to "Plan ·". The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat.
 
    **Escape hatch**: if a pane goes off-script after send (auto-explores random files, answers a different question, "thinks" about something unrelated), the TUI is contaminated. Don't try to recover with another prompt — `pool-launch.sh respawn opencode` (or `respawn codex`) to wipe that entire tier, then re-acquire and re-dispatch.
