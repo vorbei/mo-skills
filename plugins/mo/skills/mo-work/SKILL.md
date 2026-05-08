@@ -16,9 +16,6 @@ in Claude:
 ```bash
 TASK="MAX-NNN-cdx"
 T=$(pool-task.sh acquire-for --wait $TASK codex)
-# Exit plan mode if the pane is still in it from /mo-plan — codex won't write
-# files or run shell during plan mode, which would silently stall /goal.
-pool-task.sh plan-mode "$T" off
 cat > /tmp/goal-prompt.txt <<EOF
 /goal 实现 {plan-file-path}. Each Unit 内部 TDD（红→绿→commit）。每个 Unit 完成跑 pnpm typecheck && pnpm test && pnpm lint:arch，全绿才进下一个 Unit. 完成后输出 git log + diff stat 概要.
 EOF
@@ -164,10 +161,6 @@ cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
 # each kind its own pane and we can wait on them independently.
 Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
 To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
-# Ensure both panes are in build mode — review writes OUT files via the
-# agent's shell tool, which plan mode would block. Idempotent.
-pool-task.sh plan-mode "$Tc" off
-pool-task.sh plan-mode "$To" off
 
 OUT_C=$(mktemp -t mo-work-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-work-review-opencode-XXXXXX.md)

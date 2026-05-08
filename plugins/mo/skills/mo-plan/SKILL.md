@@ -13,64 +13,45 @@ synthesizes them. You do NOT write the plan yourself unless the pool is
 unavailable (fallback below).
 
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
-2. **Dispatch parallel — two phases per agent.** Plan mode in both codex and opencode is genuinely **read-only** — it blocks the agent's file-write tool, which means the OUT-contract can't be honored while in plan mode. So the dispatch runs in two phases per agent:
-
-   **Phase 1: discuss the plan in plan mode** (no file writes, agent stays in planning posture)
-   **Phase 2: write the plan to OUT in build mode** (mode flipped off, agent's just transcribing what it already worked out)
-
-   Order is load-bearing throughout: `new-session` → `plan-mode on` → `send phase-1` → `wait` → `plan-mode off` → `send phase-2` → `wait` → read OUT. Switching plan mode after sending is too late; opencode in particular will auto-explore on whatever input the welcome placeholder provides if it wakes up in build mode.
+2. **Dispatch parallel.** Same flow for codex and opencode — distinct task names so the dispatcher gives each kind its own pane and you can wait independently:
 
    ```bash
    Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
    To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
    pool-task.sh new-session "$Tc"   # /new + Enter ×2 (codex)
    pool-task.sh new-session "$To"   # Ctrl-X N (opencode)
-   pool-task.sh plan-mode "$Tc"     # MUST happen before phase-1 send
-   pool-task.sh plan-mode "$To"
 
-   # Phase 1: discuss/think (plan mode, no file writes possible).
-   # Same body for both agents; instruct each to end with READY-TO-WRITE so wait sees a settle.
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
-   PHASE1=$(mktemp -t plan-phase1-XXXXXX.txt)
-   cat > "$PHASE1" <<EOF
-   You are in plan mode (read-only). Read $LINEAR_URL and the planning
-   guidelines at docs/plans/_planning-guidelines.md, then sketch the
-   plan in this chat. Cover: Open Questions / Risks / Architecture
-   direction / Edge Case coverage / Acceptance Scenarios / Unit list.
-   Do NOT write any file. End your message with the literal line:
-   READY-TO-WRITE
-   EOF
-   pool-task.sh send "$Tc" "$PHASE1"
-   pool-task.sh send "$To" "$PHASE1"
-   pool-task.sh wait "$Tc" --timeout 600 &
-   pool-task.sh wait "$To" --timeout 600 &
-   wait; rm "$PHASE1"
-
-   # Phase 2: transcribe to OUT (plan mode OFF so file-write works).
-   pool-task.sh plan-mode "$Tc" off
-   pool-task.sh plan-mode "$To" off
-   make_phase2() {
+   make_prompt() {
      local OUT="$1"
      cat <<EOF
-   Now write the plan you just discussed to:
+   Read $LINEAR_URL and the planning guidelines at
+   docs/plans/_planning-guidelines.md. Produce a complete plan covering:
+   Open Questions / Risks / Architecture direction / Edge Case coverage /
+   Acceptance Scenarios / Unit list.
+
+   STRICT: do NOT modify, create, or delete any file in the repo. The only
+   write you may perform is to your OUT file at:
      $OUT
-   Use the planning-guidelines structure verbatim. Then reply with
-   exactly one line: DONE $OUT
+   Then reply with EXACTLY one line: DONE $OUT
    EOF
    }
-   P_C=$(mktemp -t plan-phase2-cdx-XXXXXX.txt); make_phase2 "$OUT_C" > "$P_C"
-   P_O=$(mktemp -t plan-phase2-opc-XXXXXX.txt); make_phase2 "$OUT_O" > "$P_O"
+   P_C=$(mktemp -t plan-prompt-cdx-XXXXXX.txt); make_prompt "$OUT_C" > "$P_C"
+   P_O=$(mktemp -t plan-prompt-opc-XXXXXX.txt); make_prompt "$OUT_O" > "$P_O"
    pool-task.sh send "$Tc" "$P_C" && rm "$P_C"
    pool-task.sh send "$To" "$P_O" && rm "$P_O"
-   pool-task.sh wait "$Tc" --timeout 300 &
-   pool-task.sh wait "$To" --timeout 300 &
+
+   pool-task.sh wait "$Tc" --timeout 600 &
+   pool-task.sh wait "$To" --timeout 600 &
    wait
    [[ -s "$OUT_C" ]] || tmux capture-pane -t "$Tc" -p -S -300 > "$OUT_C"
    [[ -s "$OUT_O" ]] || tmux capture-pane -t "$To" -p -S -300 > "$OUT_O"
    ```
 
-   Codex flips its model badge to "Plan mode"; opencode swaps its footer from "Build ·" to "Plan ·". The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat.
+   The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat. `pool-task.sh send` uses bracketed paste (`tmux paste-buffer -p`) so the prompt arrives as one atom; without that opencode would interpret intermediate characters mid-typing as command triggers.
+
+   **Why no plan mode toggle here**: plan mode in opencode genuinely blocks file writes (including the OUT file), so it forces a two-phase split. The same "don't run shell, don't edit files" guarantee is achievable via the prompt's STRICT clause + bracketed paste atomic delivery. Plan mode is a `pool-task.sh plan-mode PANE on` away if you ever want it for an interactive manual session.
 
    **Escape hatch**: if a pane goes off-script after send (auto-explores random files, answers a different question, "thinks" about something unrelated), the TUI is contaminated. Don't try to recover with another prompt — `pool-launch.sh respawn opencode` (or `respawn codex`) to wipe that entire tier, then re-acquire and re-dispatch.
    Each prompt instructs the agent to write its complete plan body to its
@@ -257,17 +238,17 @@ N/A entries must carry a reason. On any ❌, fix the plan before delivering.
 
 ### Pool protocol (canonical — referenced by other mo-* skills)
 
-A shared **single tmux session named `pool`** with **6 long-running TUI
-panes** in a 3×2 tiled layout, defaulting to a **2 × 2 × 2 mix** of
-three TUIs. Each pane runs one TUI; pane index ↔ tool kind is **not**
-guaranteed by index alone (`tmux split-window` order varies), so always
-discover via `pane_current_command` at runtime.
+A shared **single tmux session named `pool`** with a thin top monitor
+strip + **8 long-running TUI panes** in a 4×2 tiled layout — left
+column = 4× codex, right column = 4× opencode. Pane index ↔ tool kind
+is **not** guaranteed by index alone (`tmux split-window` order varies,
+and the monitor pane occupies index 0), so always discover via
+`pane_current_command` at runtime.
 
-| Typical pane | TUI | `pane_current_command` match |
+| Column | TUI | `pane_current_command` match |
 |---|---|---|
-| 0, 1 | OpenAI codex | `codex*` (e.g. `codex-aarch64-a`) |
-| 2, 3 | opencode (sst) | `opencode` |
-| 4, 5 | Claude Code | `2.1.123` (claude binary version) or `claude` |
+| Left  | OpenAI codex   | `codex*` (e.g. `codex-aarch64-a`) |
+| Right | opencode (sst) | `opencode` |
 
 The session + Ghostty window are launched by `~/.local/bin/pool-launch.sh`
 (fullscreen on portrait display, panes grouped by tool in rows).
@@ -285,6 +266,12 @@ acquire loops and `pool_reset` keystroke chords are deprecated.
 Other mo-* skills (`/mo-work`, `/mo-fix`, `/mo-debug`, `/mo-research`,
 `/mo-swarm`) link back to this section instead of re-defining it.
 
+**The unified flow** for any pool dispatch — codex or opencode, plan or
+review or impl: **acquire → new-session → send → wait → read OUT**. Same
+five steps, same shape regardless of which TUI or which phase. No mode
+toggles in the default path. The `pool-task.sh plan-mode PANE on` helper
+exists for interactive manual sessions; mo-* skills don't call it.
+
 **1. Acquire a task-bound pane** — block until one is available.
 
 ```bash
@@ -293,6 +280,14 @@ T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available";
 # T = "pool:0.<idx>"; the dispatcher prefers truly-fresh panes over
 # "done" (previously-used) panes, and reuses the same pane on repeat
 # calls for the same TASK so phase-to-phase context is preserved.
+```
+
+**1.5 Force a fresh TUI session** — both codex and opencode persist
+session state to disk and auto-resume on respawn. Without this step the
+new prompt gets appended to whatever stale chat the TUI loaded.
+
+```bash
+pool-task.sh new-session "$T"   # codex: /new + Enter ×2; opencode: Ctrl-X N
 ```
 
 **Task naming convention — `MAX-NNN-cdx` / `MAX-NNN-opc` per agent kind, not per phase.**
@@ -351,7 +346,10 @@ pool-task.sh send "$T" /tmp/mo-prompt-$$.txt
 rm /tmp/mo-prompt-$$.txt
 ```
 
-`pool-task.sh send` handles paste-buffer submission. Don't roll your own
+`pool-task.sh send` uses bracketed paste (`tmux paste-buffer -p`) so the
+prompt arrives as one atom. Without it tmux simulates char-by-char typing
+and opencode interprets intermediate characters as command triggers,
+running off-script before the full prompt is in. Don't roll your own
 send sequence.
 
 **3. Wait for completion** — block until the agent stops spinning, then
@@ -435,11 +433,6 @@ PLAN_FILE="<absolute-path-to-plan.md>"
 
 Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
 To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
-# Plan review writes its OUT file via the agent's shell tool; plan mode
-# may block file writes, so exit it before sending the review prompt.
-# (Idempotent if the pane is already in build mode.)
-pool-task.sh plan-mode "$Tc" off
-pool-task.sh plan-mode "$To" off
 OUT_C=$(mktemp -t mo-plan-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-plan-review-opencode-XXXXXX.md)
 
