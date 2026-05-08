@@ -16,6 +16,9 @@ in Claude:
 ```bash
 TASK="MAX-NNN-cdx"
 T=$(pool-task.sh acquire-for --wait $TASK codex)
+# Exit plan mode if the pane is still in it from /mo-plan — codex won't write
+# files or run shell during plan mode, which would silently stall /goal.
+pool-task.sh plan-mode "$T" off
 cat > /tmp/goal-prompt.txt <<EOF
 /goal 实现 {plan-file-path}. Each Unit 内部 TDD（红→绿→commit）。每个 Unit 完成跑 pnpm typecheck && pnpm test && pnpm lint:arch，全绿才进下一个 Unit. 完成后输出 git log + diff stat 概要.
 EOF

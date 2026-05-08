@@ -13,10 +13,12 @@ synthesizes them. You do NOT write the plan yourself unless the pool is
 unavailable (fallback below).
 
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
-2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently:
+2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. Switch each pane into the TUI's **plan mode** (Shift+Tab) before sending the prompt — codex flips its model badge to "Plan mode", opencode swaps its footer from "Build ·" to "Plan ·". This is read-only-ish: the TUI won't write files / run shell commands during plan mode, which keeps planning honest and fast.
    ```bash
    Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
    To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
+   pool-task.sh plan-mode "$Tc"   # codex into plan mode
+   pool-task.sh plan-mode "$To"   # opencode into plan mode
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
    ```
@@ -382,6 +384,11 @@ PLAN_FILE="<absolute-path-to-plan.md>"
 
 Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
 To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
+# Plan review writes its OUT file via the agent's shell tool; plan mode
+# may block file writes, so exit it before sending the review prompt.
+# (Idempotent if the pane is already in build mode.)
+pool-task.sh plan-mode "$Tc" off
+pool-task.sh plan-mode "$To" off
 OUT_C=$(mktemp -t mo-plan-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-plan-review-opencode-XXXXXX.md)
 
