@@ -14,14 +14,14 @@ and this skill drives implementation → review → PR. For non-trivial plans
 in Claude:
 
 ```bash
-TASK="MAX-NNN-impl"
+TASK="MAX-NNN-cdx"
 T=$(pool-task.sh acquire-for --wait $TASK codex)
 cat > /tmp/goal-prompt.txt <<EOF
 /goal 实现 {plan-file-path}. Each Unit 内部 TDD（红→绿→commit）。每个 Unit 完成跑 pnpm typecheck && pnpm test && pnpm lint:arch，全绿才进下一个 Unit. 完成后输出 git log + diff stat 概要.
 EOF
 pool-task.sh send "$T" /tmp/goal-prompt.txt
 pool-task.sh wait "$T" --timeout 3600   # /goal can run a long time
-# Don't `done` yet — keep the pane bound to MAX-NNN-impl so /mo-fix can reuse it.
+# Don't `done` yet — keep the pane bound to MAX-NNN-cdx so /mo-fix can reuse it.
 ```
 
 For small plans (1-2 Units, mechanical edits), implement directly in Claude with inline TDD evidence — `/goal` overhead isn't worth it.
@@ -159,8 +159,8 @@ cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
 
 # Two reviewers in parallel — distinct task names so the dispatcher gives
 # each kind its own pane and we can wait on them independently.
-Tc=$(pool-task.sh acquire-for --wait MAX-NNN-rev-cdx codex)
-To=$(pool-task.sh acquire-for --wait MAX-NNN-rev-opc opencode)
+Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
+To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
 
 OUT_C=$(mktemp -t mo-work-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-work-review-opencode-XXXXXX.md)

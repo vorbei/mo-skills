@@ -15,8 +15,8 @@ unavailable (fallback below).
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
 2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently:
    ```bash
-   Tc=$(pool-task.sh acquire-for --wait MAX-NNN-plan-cdx codex)
-   To=$(pool-task.sh acquire-for --wait MAX-NNN-plan-opc opencode)
+   Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
+   To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
    ```
@@ -235,12 +235,27 @@ Other mo-* skills (`/mo-work`, `/mo-fix`, `/mo-debug`, `/mo-research`,
 **1. Acquire a task-bound pane** — block until one is available.
 
 ```bash
-TASK="MAX-NNN"        # or any stable string identifying this work unit
+TASK="MAX-NNN-cdx"    # or "MAX-NNN-opc" for opencode — see naming convention below
 T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available"; exit 1; }
 # T = "pool:0.<idx>"; the dispatcher prefers truly-fresh panes over
 # "done" (previously-used) panes, and reuses the same pane on repeat
 # calls for the same TASK so phase-to-phase context is preserved.
 ```
+
+**Task naming convention — `MAX-NNN-cdx` / `MAX-NNN-opc` per agent kind, not per phase.**
+Use a single codex slot (`MAX-NNN-cdx`) and a single opencode slot
+(`MAX-NNN-opc`) across plan-write → plan-review → impl → code-review →
+fix-apply for the same issue. This keeps the entire MAX-NNN lifecycle on
+the same two panes — codex's plan-writing context flows into impl, opc's
+plan flows into code-review. `pool-task.sh done` only at issue close
+(PR merged).
+
+Trade-off: codex reviewing its own implementation lacks independence.
+Mitigations: opc runs the parallel pool review independently of cdx;
+high-stakes diffs add a `ce-code-review` Claude subagent third pass
+(see `/mo-work` § Review). Cross-model sanity tasks (mo-debug second
+opinion, mo-research contested-finding check) use their own task names
+(`MAX-NNN-debug-2nd-opinion` etc.) so they always get a fresh pane.
 
 `acquire-for --wait` defaults to a 600-second timeout. Pass `--wait 60`
 to fail-fast, or `--wait 1800` for slow days. Without `--wait` the call
@@ -365,8 +380,8 @@ independent passes minimum. `/review` is for diffs, not for plan documents.
 WORKTREE="<absolute-worktree-path>"
 PLAN_FILE="<absolute-path-to-plan.md>"
 
-Tc=$(pool-task.sh acquire-for --wait MAX-NNN-planrev-cdx codex)
-To=$(pool-task.sh acquire-for --wait MAX-NNN-planrev-opc opencode)
+Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
+To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
 OUT_C=$(mktemp -t mo-plan-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-plan-review-opencode-XXXXXX.md)
 
