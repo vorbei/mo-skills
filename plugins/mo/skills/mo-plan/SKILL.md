@@ -13,12 +13,14 @@ synthesizes them. You do NOT write the plan yourself unless the pool is
 unavailable (fallback below).
 
 1. **Pre-flight** — verify env, SSO, cwd, presence of `docs/plans/_planning-guidelines.md`. If `docs/ship-workflow.md` exists, also walk its Phase 1 pre-flight; absence is fine — these gates apply universally.
-2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. Switch each pane into the TUI's **plan mode** (Shift+Tab) before sending the prompt — codex flips its model badge to "Plan mode", opencode swaps its footer from "Build ·" to "Plan ·". This is read-only-ish: the TUI won't write files / run shell commands during plan mode, which keeps planning honest and fast.
+2. **Dispatch parallel.** Distinct task names so the dispatcher gives each kind its own pane and you can wait independently. Force a fresh TUI session (`new-session`) and switch each pane into **plan mode** (Shift+Tab) before sending the prompt. Codex flips its model badge to "Plan mode"; opencode swaps its footer from "Build ·" to "Plan ·". The fresh-session step is mandatory — both TUIs auto-resume their last on-disk conversation, so a pane that "looks idle" on dashboard may already be inside someone else's chat.
    ```bash
    Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
    To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
-   pool-task.sh plan-mode "$Tc"   # codex into plan mode
-   pool-task.sh plan-mode "$To"   # opencode into plan mode
+   pool-task.sh new-session "$Tc"   # /new + Enter ×2 (codex)
+   pool-task.sh new-session "$To"   # Ctrl-X N (opencode)
+   pool-task.sh plan-mode "$Tc"     # into plan mode
+   pool-task.sh plan-mode "$To"
    OUT_C=$(mktemp -t plan-codex-MAX-NNN-XXXXXX.md)
    OUT_O=$(mktemp -t plan-opencode-MAX-NNN-XXXXXX.md)
    ```
