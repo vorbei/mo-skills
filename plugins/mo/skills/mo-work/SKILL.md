@@ -164,6 +164,10 @@ cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
 # each kind its own pane and we can wait on them independently.
 Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)
 To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)
+# Ensure both panes are in build mode — review writes OUT files via the
+# agent's shell tool, which plan mode would block. Idempotent.
+pool-task.sh plan-mode "$Tc" off
+pool-task.sh plan-mode "$To" off
 
 OUT_C=$(mktemp -t mo-work-review-codex-XXXXXX.md)
 OUT_O=$(mktemp -t mo-work-review-opencode-XXXXXX.md)

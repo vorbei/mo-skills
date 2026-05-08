@@ -18,9 +18,9 @@ Run the **full 5-phase ship pipeline** (don't shortcut). Start at Phase 0 pre-fl
 
 This is **Phase 3** of ship-workflow. The diff is already implemented; reviewers' findings are in scope.
 
-1. **Dispatch parallel review** — `To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)` and run a `ce-code-review` Claude subagent in parallel. Both get the brief at `/tmp/review-MAX-NNN.md` referencing the plan and base SHA. opencode writes verdict to `/tmp/review-opencode-MAX-NNN.md` via the OUT-contract; the ce-code-review agent returns its findings inline. Never hardcode pane indices — the dispatcher picks idle panes for you and indices shift across pool rebuilds.
+1. **Dispatch parallel review** — `To=$(pool-task.sh acquire-for --wait MAX-NNN-opc opencode)`, then `pool-task.sh plan-mode "$To" off` (review writes OUT via shell tool — plan mode would block), and run a `ce-code-review` Claude subagent in parallel. Both get the brief at `/tmp/review-MAX-NNN.md` referencing the plan and base SHA. opencode writes verdict to `/tmp/review-opencode-MAX-NNN.md` via the OUT-contract; the ce-code-review agent returns its findings inline. Never hardcode pane indices — the dispatcher picks idle panes for you and indices shift across pool rebuilds.
 2. **Merge findings** — Both flag = definitely fix (high confidence). One flag + valid = fix if P0, defer if P2, judge if P1. Conflicting = adjudicate based on plan + project conventions.
-3. **Apply** — re-acquire the implementing codex pane via its task name (`Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)` returns the same pane if MAX-NNN is still registered), instruct it to fix P0/P1, then commit "fix(scope): address P0/P1 review feedback".
+3. **Apply** — re-acquire the implementing codex pane via its task name (`Tc=$(pool-task.sh acquire-for --wait MAX-NNN-cdx codex)` returns the same pane if MAX-NNN is still registered), `pool-task.sh plan-mode "$Tc" off` to ensure it can write code, then instruct it to fix P0/P1 and commit "fix(scope): address P0/P1 review feedback".
 4. **Triple gate** — `pnpm typecheck && pnpm test && pnpm lint:arch` GREEN before continuing to Phase 4.
 
 P2 default = deferred (note in PR body, don't fix this round). Only fix P2 if user explicitly asks.
@@ -203,6 +203,8 @@ cd "$WORKTREE" && git fetch origin "${BASE_DEFAULT}"
 # Pool protocol — see /mo-plan § Pool protocol.
 TASK="MAX-NNN-cdx"
 T=$(pool-task.sh acquire-for --wait $TASK codex) || { echo "no codex available"; exit 1; }
+# Reviewer writes OUT file via shell tool — plan mode would block. Idempotent.
+pool-task.sh plan-mode "$T" off
 
 # Free-form prompt with OUT file contract — review-fix loop iterates
 # on the findings programmatically, so we need parseable output.
